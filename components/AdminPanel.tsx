@@ -5,6 +5,7 @@ import StatisticsScreen from './StatisticsScreen';
 import InventoryScreen from './InventoryScreen';
 import MockDataInjector from './MockDataInjector';
 import { DEFAULT_PRICES } from '../services/billingService';
+import { generatePrintText } from '../services/geminiService';
 
 interface AdminPanelProps {
   patients: Patient[];
@@ -797,10 +798,16 @@ const PrintSettingsManager: React.FC<{
     onUpdate: (data: AppPrintSettings) => void;
 }> = ({ settings, onUpdate }) => {
     const [activeSection, setActiveSection] = useState<'lab' | 'prescription' | 'bill'>('lab');
+    const [configTab, setConfigTab] = useState<'margins' | 'header' | 'footer'>('margins');
+    
+    const [headerAiPrompt, setHeaderAiPrompt] = useState('');
+    const [footerAiPrompt, setFooterAiPrompt] = useState('');
+    const [isHeaderAiLoading, setIsHeaderAiLoading] = useState(false);
+    const [isFooterAiLoading, setIsFooterAiLoading] = useState(false);
 
     const handleChange = (section: keyof AppPrintSettings, field: string, value: string) => {
         const numValue = parseFloat(value) || 0;
-        if (section === 'headerImage') return;
+        if (section === 'headerImage' || section === 'footerImage' || section === 'headerText' || section === 'footerText') return;
         
         onUpdate({
             ...settings,
@@ -833,78 +840,228 @@ const PrintSettingsManager: React.FC<{
         });
     };
 
+    const handleFooterFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const base64 = event.target?.result as string;
+                onUpdate({
+                    ...settings,
+                    footerImage: base64
+                });
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleRemoveFooterLogo = () => {
+        onUpdate({
+            ...settings,
+            footerImage: ''
+        });
+    };
+
+    const handleGenerateHeaderWithAi = async () => {
+        if (!headerAiPrompt.trim()) return;
+        setIsHeaderAiLoading(true);
+        try {
+            const text = await generatePrintText(headerAiPrompt, 'header');
+            onUpdate({ ...settings, headerText: text });
+            setHeaderAiPrompt('');
+        } catch (err) {
+            alert("Failed to generate header text. Please try again.");
+        } finally {
+            setIsHeaderAiLoading(false);
+        }
+    };
+
+    const handleGenerateFooterWithAi = async () => {
+        if (!footerAiPrompt.trim()) return;
+        setIsFooterAiLoading(true);
+        try {
+            const text = await generatePrintText(footerAiPrompt, 'footer');
+            onUpdate({ ...settings, footerText: text });
+            setFooterAiPrompt('');
+        } catch (err) {
+            alert("Failed to generate footer text. Please try again.");
+        } finally {
+            setIsFooterAiLoading(false);
+        }
+    };
+
     const currentMargins = settings[activeSection] || { marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, headerHeight: 0, footerHeight: 0 };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="md:col-span-2 bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-6">
-                <div className="flex justify-between items-center border-b pb-4">
-                    <div>
-                        <h3 className="text-base font-black uppercase text-slate-800">Print Margins Layout</h3>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Adjust Page Paddings per Module (in millimeters)</p>
-                    </div>
-                </div>
-                
-                <div className="flex bg-slate-100 p-1.5 rounded-xl gap-2">
-                    <button onClick={() => setActiveSection('lab')} className={`flex-grow py-2 rounded-lg font-bold text-xs uppercase transition-all ${activeSection === 'lab' ? 'bg-white text-blue-600 shadow' : 'text-slate-500'}`}>Lab Report</button>
-                    <button onClick={() => setActiveSection('prescription')} className={`flex-grow py-2 rounded-lg font-bold text-xs uppercase transition-all ${activeSection === 'prescription' ? 'bg-white text-purple-600 shadow' : 'text-slate-500'}`}>Prescription</button>
-                    <button onClick={() => setActiveSection('bill')} className={`flex-grow py-2 rounded-lg font-bold text-xs uppercase transition-all ${activeSection === 'bill' ? 'bg-white text-green-600 shadow' : 'text-slate-500'}`}>Bill / Invoice</button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Header Space (mm)</label>
-                        <input type="number" value={currentMargins.headerHeight} onChange={e => handleChange(activeSection, 'headerHeight', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
-                        <p className="text-[9px] text-slate-400 mt-1 font-medium">Blank space at top reserved for logo/letterhead</p>
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Footer Space (mm)</label>
-                        <input type="number" value={currentMargins.footerHeight} onChange={e => handleChange(activeSection, 'footerHeight', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Top (mm)</label>
-                        <input type="number" value={currentMargins.marginTop} onChange={e => handleChange(activeSection, 'marginTop', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Bottom (mm)</label>
-                        <input type="number" value={currentMargins.marginBottom} onChange={e => handleChange(activeSection, 'marginBottom', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Left (mm)</label>
-                        <input type="number" value={currentMargins.marginLeft} onChange={e => handleChange(activeSection, 'marginLeft', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
-                    </div>
-                    <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Right (mm)</label>
-                        <input type="number" value={currentMargins.marginRight} onChange={e => handleChange(activeSection, 'marginRight', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
-                    </div>
-                </div>
+        <div className="space-y-6">
+            <div className="flex bg-slate-200/50 p-1.5 rounded-2xl gap-2 w-fit">
+                <button onClick={() => setConfigTab('margins')} className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase transition-all flex items-center gap-1.5 ${configTab === 'margins' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}>📋 Margins & Layout</button>
+                <button onClick={() => setConfigTab('header')} className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase transition-all flex items-center gap-1.5 ${configTab === 'header' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}>🖼️ Custom Header</button>
+                <button onClick={() => setConfigTab('footer')} className={`px-5 py-2.5 rounded-xl font-black text-xs uppercase transition-all flex items-center gap-1.5 ${configTab === 'footer' ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}>🦶 Custom Footer</button>
             </div>
 
-            <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-6 flex flex-col justify-between">
-                <div>
-                    <h3 className="text-base font-black uppercase text-slate-800 border-b pb-4 mb-4">Hospital Header Image</h3>
-                    <p className="text-xs text-slate-500 leading-relaxed mb-4">Upload a banner or hospital logo image. This image will automatically scale to fit the top of your prescriptions, lab reports, and bills.</p>
-                    
-                    {settings.headerImage ? (
-                        <div className="space-y-4">
-                            <div className="border border-slate-200 p-2.5 rounded-xl bg-slate-50 flex items-center justify-center h-32 overflow-hidden">
-                                <img src={settings.headerImage} alt="Header Preview" className="max-h-full max-w-full object-contain" />
-                            </div>
-                            <button onClick={handleRemoveLogo} className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all">Remove Logo Image</button>
+            {configTab === 'margins' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div className="md:col-span-3 bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-6">
+                        <div>
+                            <h3 className="text-base font-black uppercase text-slate-800">Print Margins Layout</h3>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Adjust Page Paddings per Module (in millimeters)</p>
                         </div>
-                    ) : (
-                        <label className="border-2 border-dashed border-slate-300 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/20 transition-all text-center h-48">
-                            <span className="text-3xl mb-2">🖼️</span>
-                            <span className="text-xs font-black uppercase tracking-wider text-slate-500">Choose Logo File</span>
-                            <span className="text-[9px] text-slate-400 font-bold uppercase mt-1">PNG, JPG or SVG (Max 1MB)</span>
-                            <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-                        </label>
-                    )}
+                        
+                        <div className="flex bg-slate-100 p-1.5 rounded-xl gap-2">
+                            <button onClick={() => setActiveSection('lab')} className={`flex-grow py-2 rounded-lg font-bold text-xs uppercase transition-all ${activeSection === 'lab' ? 'bg-white text-blue-600 shadow' : 'text-slate-500'}`}>Lab Report</button>
+                            <button onClick={() => setActiveSection('prescription')} className={`flex-grow py-2 rounded-lg font-bold text-xs uppercase transition-all ${activeSection === 'prescription' ? 'bg-white text-purple-600 shadow' : 'text-slate-500'}`}>Prescription</button>
+                            <button onClick={() => setActiveSection('bill')} className={`flex-grow py-2 rounded-lg font-bold text-xs uppercase transition-all ${activeSection === 'bill' ? 'bg-white text-green-600 shadow' : 'text-slate-500'}`}>Bill / Invoice</button>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Header Space (mm)</label>
+                                <input type="number" value={currentMargins.headerHeight} onChange={e => handleChange(activeSection, 'headerHeight', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
+                                <p className="text-[9px] text-slate-400 mt-1 font-medium">Blank space at top reserved for logo/letterhead</p>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Footer Space (mm)</label>
+                                <input type="number" value={currentMargins.footerHeight} onChange={e => handleChange(activeSection, 'footerHeight', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Top (mm)</label>
+                                <input type="number" value={currentMargins.marginTop} onChange={e => handleChange(activeSection, 'marginTop', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Bottom (mm)</label>
+                                <input type="number" value={currentMargins.marginBottom} onChange={e => handleChange(activeSection, 'marginBottom', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Left (mm)</label>
+                                <input type="number" value={currentMargins.marginLeft} onChange={e => handleChange(activeSection, 'marginLeft', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Margin Right (mm)</label>
+                                <input type="number" value={currentMargins.marginRight} onChange={e => handleChange(activeSection, 'marginRight', e.target.value)} className="w-full border p-2.5 rounded-xl text-sm font-semibold" />
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-[10px] font-bold text-blue-600 uppercase tracking-wide mt-4">
-                    💡 Tip: Best banner resolution is wide (e.g. 800 x 200 pixels) with transparent or white background.
+            )}
+
+            {configTab === 'header' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-6">
+                        <h3 className="text-base font-black uppercase text-slate-800 border-b pb-4">Hospital Header Text</h3>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Header Copy Text (HTML/CSS allowed)</label>
+                                <textarea 
+                                    value={settings.headerText || ''} 
+                                    onChange={e => onUpdate({ ...settings, headerText: e.target.value })} 
+                                    className="w-full h-32 border p-3 rounded-xl text-xs font-mono" 
+                                    placeholder="Enter clinic header details (e.g. Hospital Name, Doctors, Contact info...)" 
+                                />
+                            </div>
+
+                            <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl space-y-3">
+                                <label className="block text-[9px] font-black text-blue-600 uppercase">✨ Write / Format Header with AI</label>
+                                <input 
+                                    type="text" 
+                                    value={headerAiPrompt} 
+                                    onChange={e => setHeaderAiPrompt(e.target.value)} 
+                                    className="w-full border border-blue-200 p-2.5 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-100" 
+                                    placeholder="e.g. Generate header for J.J. Hospital with Dr. Mohit Agrawal (OB/GYN) and contact details" 
+                                />
+                                <button 
+                                    onClick={handleGenerateHeaderWithAi} 
+                                    disabled={isHeaderAiLoading} 
+                                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-sm"
+                                >
+                                    {isHeaderAiLoading ? 'Generating text...' : 'Generate Header'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-4">
+                        <h3 className="text-base font-black uppercase text-slate-800 border-b pb-4">Hospital Header Logo / Banner</h3>
+                        <p className="text-xs text-slate-500 leading-relaxed">Upload a hospital logo or letterhead banner. Set the margin space to place this logo at the absolute top of print outs.</p>
+                        
+                        {settings.headerImage ? (
+                            <div className="space-y-4">
+                                <div className="border border-slate-200 p-2.5 rounded-xl bg-slate-50 flex items-center justify-center h-36 overflow-hidden">
+                                    <img src={settings.headerImage} alt="Header Preview" className="max-h-full max-w-full object-contain" />
+                                </div>
+                                <button onClick={handleRemoveLogo} className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all">Remove Header Image</button>
+                            </div>
+                        ) : (
+                            <label className="border-2 border-dashed border-slate-300 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/20 transition-all text-center h-48">
+                                <span className="text-3xl mb-2">🖼️</span>
+                                <span className="text-xs font-black uppercase tracking-wider text-slate-500">Choose Header File</span>
+                                <span className="text-[9px] text-slate-400 font-bold uppercase mt-1">PNG, JPG or SVG (Max 1MB)</span>
+                                <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+                            </label>
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
+
+            {configTab === 'footer' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-6">
+                        <h3 className="text-base font-black uppercase text-slate-800 border-b pb-4">Hospital Footer Text</h3>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5">Footer Copy Text (HTML/CSS allowed)</label>
+                                <textarea 
+                                    value={settings.footerText || ''} 
+                                    onChange={e => onUpdate({ ...settings, footerText: e.target.value })} 
+                                    className="w-full h-32 border p-3 rounded-xl text-xs font-mono" 
+                                    placeholder="Enter footer terms (e.g. Valid for 10 days, Not valid for medico-legal cases...)" 
+                                />
+                            </div>
+
+                            <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl space-y-3">
+                                <label className="block text-[9px] font-black text-blue-600 uppercase">✨ Write / Format Footer with AI</label>
+                                <input 
+                                    type="text" 
+                                    value={footerAiPrompt} 
+                                    onChange={e => setFooterAiPrompt(e.target.value)} 
+                                    className="w-full border border-blue-200 p-2.5 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-100" 
+                                    placeholder="e.g. Generate standard clinical disclaimer, valid for 7 days, and doctor signature note" 
+                                />
+                                <button 
+                                    onClick={handleGenerateFooterWithAi} 
+                                    disabled={isFooterAiLoading} 
+                                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-black py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-sm"
+                                >
+                                    {isFooterAiLoading ? 'Generating text...' : 'Generate Footer'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-200 space-y-4">
+                        <h3 className="text-base font-black uppercase text-slate-800 border-b pb-4">Hospital Footer Logo / Image</h3>
+                        <p className="text-xs text-slate-500 leading-relaxed">Upload a custom footer graphic, stamp, or signature image. This image will automatically scale to print at the bottom of the page.</p>
+                        
+                        {settings.footerImage ? (
+                            <div className="space-y-4">
+                                <div className="border border-slate-200 p-2.5 rounded-xl bg-slate-50 flex items-center justify-center h-36 overflow-hidden">
+                                    <img src={settings.footerImage} alt="Footer Preview" className="max-h-full max-w-full object-contain" />
+                                </div>
+                                <button onClick={handleRemoveFooterLogo} className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all">Remove Footer Image</button>
+                            </div>
+                        ) : (
+                            <label className="border-2 border-dashed border-slate-300 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/20 transition-all text-center h-48">
+                                <span className="text-3xl mb-2">🖼️</span>
+                                <span className="text-xs font-black uppercase tracking-wider text-slate-500">Choose Footer File</span>
+                                <span className="text-[9px] text-slate-400 font-bold uppercase mt-1">PNG, JPG or SVG (Max 1MB)</span>
+                                <input type="file" accept="image/*" onChange={handleFooterFileChange} className="hidden" />
+                            </label>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

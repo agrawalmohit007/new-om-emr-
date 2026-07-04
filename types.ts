@@ -443,6 +443,9 @@ export interface AppPrintSettings {
     prescription: PageMargins;
     bill: PageMargins;
     headerImage?: string; // base64 or URL
+    headerText?: string;
+    footerImage?: string; // base64 or URL
+    footerText?: string;
 }
 
 export interface AppConfig {
