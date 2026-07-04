@@ -776,10 +776,20 @@ CRITICAL MEDICAL & AUTOFILL RULES:
                 properties: schemaProperties
             },
             temperature: 0.1,
-            maxOutputTokens: 1000
+            maxOutputTokens: 2000
         }
     });
 
-    return JSON.parse(response.text.trim());
+    const safeJsonParse = (rawText: string): Record<string, string> => {
+        let cleanText = rawText.trim();
+        if (cleanText.startsWith("```json")) {
+            cleanText = cleanText.substring(7, cleanText.length - 3);
+        } else if (cleanText.startsWith("```")) {
+            cleanText = cleanText.substring(3, cleanText.length - 3);
+        }
+        return JSON.parse(cleanText.trim());
+    };
+
+    return safeJsonParse(response.text);
 };
 
