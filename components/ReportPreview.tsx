@@ -61,13 +61,16 @@ const ReportPage: React.FC<{children: React.ReactNode, reportData: CbcReportData
     const selectedDoctor = doctorCredentials[reportData.doctorName] || { qualifications: '', specialty: '' };
     // Default 55mm header height if not provided in settings
     const layout = settings?.lab || { marginTop: 10, marginBottom: 10, marginLeft: 15, marginRight: 5, headerHeight: 55, footerHeight: 10 };
+    const hasHeaderImage = !!settings?.headerImage;
+    const headerHeightVal = (layout.headerHeight && layout.headerHeight > 0) ? layout.headerHeight : 55;
+    const computedPaddingTop = hasHeaderImage ? `${headerHeightVal + (layout.marginTop || 0)}mm` : `${layout.marginTop}mm`;
     
     return (
         <div 
             className={`report-page bg-white text-black font-sans shadow-lg w-[794px] h-[1123px] flex flex-col mb-4 overflow-hidden relative ${className}`}
             style={{
                 // Padding is applied to the page container to create margins
-                paddingTop: `${layout.marginTop}mm`,
+                paddingTop: computedPaddingTop,
                 paddingBottom: `${layout.marginBottom}mm`,
                 paddingLeft: `${layout.marginLeft}mm`,
                 paddingRight: `${layout.marginRight}mm`,
@@ -75,10 +78,14 @@ const ReportPage: React.FC<{children: React.ReactNode, reportData: CbcReportData
             }}
         >
             <div className="flex flex-col h-full relative">
-                {/* HEADER - Dynamic Height */}
-                <header style={{ height: `${layout.headerHeight}mm`, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }} className="w-full flex-shrink-0">
-                    {settings?.headerImage ? <img src={settings.headerImage} style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }} alt="Hospital Header" /> : null}
-                </header>
+                {/* HEADER - Edge-to-Edge */}
+                {hasHeaderImage ? (
+                    <header style={{ position: 'absolute', top: 0, left: 0, right: 0, width: '100%', height: `${headerHeightVal}mm`, overflow: 'hidden' }} className="flex-shrink-0">
+                        <img src={settings.headerImage} style={{ width: '100%', height: '100%', objectFit: 'fill' }} alt="Hospital Header" />
+                    </header>
+                ) : (
+                    <header style={{ height: `${layout.headerHeight}mm` }} className="w-full flex-shrink-0" />
+                )}
                 
                 {/* Report Title & Patient Details */}
                  <div className="text-center mb-1 flex-shrink-0">

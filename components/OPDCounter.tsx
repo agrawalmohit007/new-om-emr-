@@ -357,6 +357,9 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
     ).join('');
 
     const layout = printSettings?.bill || { marginTop: 10, marginBottom: 10, marginLeft: 10, marginRight: 10, headerHeight: 70, footerHeight: 10 };
+    const hasHeaderImage = !!printSettings?.headerImage;
+    const headerHeightVal = (layout.headerHeight && layout.headerHeight > 0) ? layout.headerHeight : 70;
+    const computedPaddingTop = hasHeaderImage ? `${headerHeightVal + (layout.marginTop || 0)}mm` : `${layout.marginTop}mm`;
 
     printWindow.document.write(`
       <html>
@@ -367,12 +370,13 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
                 font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
                 color: #333; 
                 margin: 0;
-                padding-top: ${layout.marginTop}mm;
+                padding-top: ${computedPaddingTop};
                 padding-bottom: ${layout.marginBottom}mm;
                 padding-left: ${layout.marginLeft}mm;
                 padding-right: ${layout.marginRight}mm;
+                position: relative;
+                box-sizing: border-box;
             }
-            .header-space { height: ${layout.headerHeight}mm; }
             .footer-space { height: ${layout.footerHeight}mm; }
             .container { width: 100%; }
             .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
@@ -387,18 +391,20 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
             .signatures { display: flex; justify-content: space-between; margin-top: 50px; font-size: 12px; font-weight: bold; }
             .signatures div { border-top: 1px solid #333; padding-top: 5px; width: 40%; text-align: center; }
             @media print {
-                body { padding: 0; padding-top: ${layout.marginTop}mm; padding-left: ${layout.marginLeft}mm; }
+                body { padding: 0; padding-top: ${computedPaddingTop}; padding-left: ${layout.marginLeft}mm; }
                 @page { margin: 0; }
             }
           </style>
         </head>
         <body>
-          <div class="header-space" style="display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 5mm;">${printSettings?.headerImage ? `<img src="${printSettings.headerImage}" style="max-height: 100%; max-width: 100%; object-fit: contain;" />` : ''}</div>
+          ${hasHeaderImage ? `<div style="position: absolute; top: 0; left: 0; right: 0; width: 100%; height: ${headerHeightVal}mm; overflow: hidden;"><img src="${printSettings.headerImage}" style="width: 100%; height: 100%; object-fit: fill;" /></div>` : ''}
           <div class="container">
-            <div class="header">
-              <h1>HOSPITAL CONNECT</h1>
-              <p>Consultant: ${visit.assignedDoctor}</p>
-            </div>
+            ${!hasHeaderImage ? `
+              <div class="header">
+                <h1>HOSPITAL CONNECT</h1>
+                <p>Consultant: ${visit.assignedDoctor}</p>
+              </div>
+            ` : ''}
             <div class="info">
               <div>
                 <strong>Patient Details:</strong><br>
@@ -410,7 +416,7 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
                 <strong>Bill Details:</strong><br>
                 Bill No: ${billNo}<br>
                 Date: ${visit.date}<br>
-                Time: ${new Date().toLocaleTimeString()}
+                Time: ${new Date().toLocaleTimeString()}${hasHeaderImage ? `<br>Consultant: ${visit.assignedDoctor}` : ''}
               </div>
             </div>
             <table>
