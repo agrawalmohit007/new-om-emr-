@@ -93,6 +93,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const [localGenNotes, setLocalGenNotes] = useState('');
   const [localPhysExam, setLocalPhysExam] = useState('');
   const [localRx, setLocalRx] = useState('');
+  const [lookAheadSuggestions, setLookAheadSuggestions] = useState<{ label: string; text: string; category: 'lab' | 'radiology' | 'vaccine' }[]>([]);
   const [localRemarks, setLocalRemarks] = useState('');
   const [localFollowUpDate, setLocalFollowUpDate] = useState('');
   const [localCustomFields, setLocalCustomFields] = useState<Record<string, string>>({});
@@ -720,6 +721,48 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
           i.quantity > 0
       );
   };
+
+  useEffect(() => {
+    if (!localPog) {
+      setLookAheadSuggestions([]);
+      return;
+    }
+    const match = localPog.match(/\d+/);
+    if (!match) {
+      setLookAheadSuggestions([]);
+      return;
+    }
+    const weeks = parseInt(match[0], 10);
+    if (isNaN(weeks)) {
+      setLookAheadSuggestions([]);
+      return;
+    }
+
+    const suggestions: { label: string; text: string; category: 'lab' | 'radiology' | 'vaccine' }[] = [];
+
+    if (weeks >= 6 && weeks <= 12) {
+        suggestions.push({ label: "🔬 Initial ANC Labs (CBC, Ur, Gr, TSH)", text: "Initial ANC Labs (CBC, Urine R/E, Blood Grouping, TSH)", category: 'lab' });
+        suggestions.push({ label: "🔍 NT/NB Scan (11w-13w)", text: "Ultrasonography (USG): NT/NB Scan", category: 'radiology' });
+    }
+    if (weeks >= 13 && weeks <= 20) {
+        suggestions.push({ label: "🔍 Anomaly Scan (18w-22w)", text: "Ultrasonography (USG): Target Anomaly Scan", category: 'radiology' });
+    }
+    if (weeks >= 20 && weeks <= 26) {
+        suggestions.push({ label: "🔬 Oral Glucose Test (OGTT at 24w)", text: "Oral Glucose Tolerance Test (OGTT)", category: 'lab' });
+        suggestions.push({ label: "💉 TT/Td Vaccine (1st/2nd dose)", text: "Inj Td (Tetanus & adult Diphtheria) vaccine", category: 'vaccine' });
+    }
+    if (weeks >= 26 && weeks <= 32) {
+        suggestions.push({ label: "🔍 Growth Scan (28w-32w)", text: "Ultrasonography (USG): Obstetric Growth Scan with Doppler", category: 'radiology' });
+        suggestions.push({ label: "💉 TDAP Vaccine (28w-32w)", text: "Inj TDAP (Tetanus, Diphtheria, Pertussis) vaccine", category: 'vaccine' });
+        suggestions.push({ label: "🔬 Repeat CBC & Urine R/E", text: "Complete Blood Count (CBC), Urine R/E", category: 'lab' });
+    }
+    if (weeks >= 32 && weeks <= 38) {
+        suggestions.push({ label: "🔬 GBS Screening (35w-37w)", text: "Vaginal/Rectal swab for Group B Streptococcus (GBS) screening", category: 'lab' });
+        suggestions.push({ label: "🔍 Obstetric Color Doppler", text: "Ultrasonography (USG): Obstetric Color Doppler", category: 'radiology' });
+    }
+
+    setLookAheadSuggestions(suggestions);
+  }, [localPog]);
 
   const handleDrugClick = (drugName: string) => {
       const stock = getStockLevel(drugName);
@@ -1723,7 +1766,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
        <div className="p-4 border-b border-slate-100 bg-blue-50/30">
           <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-1.5 mb-3"><span>✨</span> AI INSIGHTS</h3>
-          <ul className="list-disc pl-4 text-xs font-bold text-slate-600 space-y-2 marker:text-blue-300">
+          <ul className="list-disc pl-4 text-xs font-bold text-slate-600 space-y-2 marker:text-blue-300 mb-3">
              {isAiLoading ? (
                  <li className="animate-pulse">Analyzing case data...</li>
              ) : (
@@ -1734,6 +1777,31 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                </>
              )}
           </ul>
+
+          {selectedPatient?.type === 'obstetric' && lookAheadSuggestions.length > 0 && (
+             <div className="mt-3 pt-3 border-t border-blue-100/50">
+               <h4 className="text-[8px] font-black uppercase text-blue-500 tracking-wider mb-2">🤰 Look-Ahead Prompts (Trimester Milestones):</h4>
+               <div className="flex flex-col gap-1.5">
+                  {lookAheadSuggestions.map((s, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          const currentVal = localRemarks.trim();
+                          const appendStr = `- ${s.text}`;
+                          if (!currentVal.includes(s.text)) {
+                            setLocalRemarks(prev => `${prev}${prev ? '\n' : ''}${appendStr}`);
+                          }
+                        }}
+                        className="text-left bg-white border border-blue-100 hover:bg-blue-50 p-2 rounded-xl text-[9px] font-bold text-slate-700 transition flex items-center justify-between"
+                        title="Click to advise this test/vaccine in Doctor Remarks"
+                      >
+                         <span>{s.label}</span>
+                         <span className="text-blue-500 font-bold ml-1">＋</span>
+                      </button>
+                  ))}
+               </div>
+             </div>
+          )}
        </div>
 
        <div className="p-4 space-y-2 mt-auto">
