@@ -133,6 +133,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const [localRx, setLocalRx] = useState('');
   const [lookAheadSuggestions, setLookAheadSuggestions] = useState<{ label: string; text: string; category: 'lab' | 'radiology' | 'vaccine' }[]>([]);
   const [localRemarks, setLocalRemarks] = useState('');
+  const [isCompleteActive, setIsCompleteActive] = useState(false);
   const [localFollowUpDate, setLocalFollowUpDate] = useState('');
   const [localCustomFields, setLocalCustomFields] = useState<Record<string, string>>({});
   const [showQuickComplaints, setShowQuickComplaints] = useState(false);
@@ -730,6 +731,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
       setLocalRemarks(activeVisit?.remarks || '');
       setLocalFollowUpDate(activeVisit?.followUpDate || '');
       setLocalCustomFields(activeVisit?.customFields || {});
+      setIsCompleteActive(false);
       
       setLabSelection({
         cbc: false, serology: false, urine: false, other: false, 
@@ -2225,11 +2227,33 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   <button onClick={() => setShowCustomizeModal(true)} className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors">⚙️</button>
                   <button onClick={handlePrintPrescription} className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors">🖨️</button>
                   <button
+                     onClick={(e) => {
+                       const v = visits.find(vis => vis.patientId === selectedPatient.id && !vis.isApproved) || visits.find(vis => vis.patientId === selectedPatient.id && vis.isApproved);
+                       if (e.ctrlKey) {
+                         if (v) handleApprove(v.id);
+                       } else {
+                         handleSaveCaseData(false);
+                         setIsCompleteActive(true);
+                       }
+                     }}
+                     className="bg-emerald-600 text-white px-5 py-2 rounded-lg font-black uppercase text-[10px] tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
+                     title="Click to Save. Ctrl + Click to Save & Complete Case."
+                  >
+                     💾 SAVE CASE
+                  </button>
+                  <button
                      onClick={() => {
+                       if (!isCompleteActive) return;
                        const v = visits.find(vis => vis.patientId === selectedPatient.id && !vis.isApproved) || visits.find(vis => vis.patientId === selectedPatient.id && vis.isApproved);
                        if (v) handleApprove(v.id);
                      }}
-                     className="bg-blue-600 text-white px-5 py-2 rounded-lg font-black uppercase text-[10px] tracking-widest hover:bg-blue-700 transition-all shadow-sm"
+                     disabled={!isCompleteActive}
+                     className={`px-5 py-2 rounded-lg font-black uppercase text-[10px] tracking-widest transition-all shadow-sm ${
+                       isCompleteActive 
+                         ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer' 
+                         : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                     }`}
+                     title={isCompleteActive ? "Click to close and finalize this episode." : "Please save case details first to enable completion."}
                   >
                      ✓ COMPLETE CASE
                   </button>
