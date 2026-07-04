@@ -370,15 +370,18 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
                 font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
                 color: #333; 
                 margin: 0;
+            }
+            .container { 
+                width: 100%; 
+                min-height: 297mm;
+                position: relative;
+                box-sizing: border-box;
                 padding-top: ${computedPaddingTop};
                 padding-bottom: ${layout.marginBottom}mm;
                 padding-left: ${layout.marginLeft}mm;
                 padding-right: ${layout.marginRight}mm;
-                position: relative;
-                box-sizing: border-box;
             }
             .footer-space { height: ${layout.footerHeight}mm; }
-            .container { width: 100%; }
             .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
             .header h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
             .header p { margin: 5px 0 0; font-size: 14px; }
@@ -391,7 +394,8 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
             .signatures { display: flex; justify-content: space-between; margin-top: 50px; font-size: 12px; font-weight: bold; }
             .signatures div { border-top: 1px solid #333; padding-top: 5px; width: 40%; text-align: center; }
             @media print {
-                body { padding: 0; padding-top: ${computedPaddingTop}; padding-left: ${layout.marginLeft}mm; }
+                body { margin: 0; }
+                .container { padding-top: ${computedPaddingTop}; padding-left: ${layout.marginLeft}mm; padding-right: ${layout.marginRight}mm; }
                 @page { margin: 0; }
             }
           </style>

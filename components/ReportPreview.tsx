@@ -68,22 +68,23 @@ const ReportPage: React.FC<{children: React.ReactNode, reportData: CbcReportData
     return (
         <div 
             className={`report-page bg-white text-black font-sans shadow-lg w-[794px] h-[1123px] flex flex-col mb-4 overflow-hidden relative ${className}`}
-            style={{
-                // Padding is applied to the page container to create margins
-                paddingTop: computedPaddingTop,
-                paddingBottom: `${layout.marginBottom}mm`,
-                paddingLeft: `${layout.marginLeft}mm`,
-                paddingRight: `${layout.marginRight}mm`,
-                boxSizing: 'border-box'
-            }}
         >
-            <div className="flex flex-col h-full relative">
-                {/* HEADER - Edge-to-Edge */}
-                {hasHeaderImage ? (
-                    <header style={{ position: 'absolute', top: 0, left: 0, right: 0, width: '100%', height: `${headerHeightVal}mm`, overflow: 'hidden' }} className="flex-shrink-0">
-                        <img src={settings.headerImage} style={{ width: '100%', height: '100%', objectFit: 'fill' }} alt="Hospital Header" />
-                    </header>
-                ) : (
+            {hasHeaderImage && (
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, width: '100%', height: `${headerHeightVal}mm`, overflow: 'hidden' }}>
+                    <img src={settings.headerImage} style={{ width: '100%', height: '100%', objectFit: 'fill' }} alt="Hospital Header" />
+                </div>
+            )}
+            <div 
+                className="flex flex-col h-full relative"
+                style={{
+                    paddingTop: computedPaddingTop,
+                    paddingBottom: `${layout.marginBottom}mm`,
+                    paddingLeft: `${layout.marginLeft}mm`,
+                    paddingRight: `${layout.marginRight}mm`,
+                    boxSizing: 'border-box'
+                }}
+            >
+                {!hasHeaderImage && (
                     <header style={{ height: `${layout.headerHeight}mm` }} className="w-full flex-shrink-0" />
                 )}
                 
