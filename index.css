@@ -1,0 +1,40 @@
+/* ============================================================
+   EMR Portal - Global CSS
+   Auto-flow grid responsive overrides + utility styles
+   ============================================================ */
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 9999px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* -- EMR Auto-flow Grid Responsive Breakpoints --------------- */
+/* Mobile: all fields in 1 column */
+@media (max-width: 767px) {
+  .emr-auto-grid { grid-template-columns: 1fr !important; }
+  .emr-auto-grid > div[style] { grid-column: span 1 !important; }
+}
+
+/* Tablet: 2 columns */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .emr-auto-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .emr-auto-grid > div[style*="span 3"] { grid-column: span 2 !important; }
+}
+
+/* -- Line clamp utilities ----------------------------------- */
+.line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+/* -- Animate pulse ------------------------------------------ */
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+/* -- Base --------------------------------------------------- */
+* { box-sizing: border-box; }
+body { -webkit-tap-highlight-color: transparent; }
+
+/* Mobile: no horizontal overflow */
+@media (max-width: 640px) {
+  body { overflow-x: hidden; }
+}

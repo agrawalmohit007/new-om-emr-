@@ -1,0 +1,7 @@
+{
+  "name": "Remix: om emr portal WITH PROPER LAB REPORT PRINT ",
+  "description": "Integrated hospital management app with OPD registration, pregnancy tracking, doctor dashboard, lab reporting, and billing.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
