@@ -3,8 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { CbcReportData, PharmacyItem, DailyRoundNote, LabourProgressEntry, PostOperativeNote, IpdDischargeSummary, IpdMedicationChartEntry, IpdAdmissionNote, IpdRoundNote } from '../types';
 
 // Fix: Ensure GoogleGenAI initialization uses named parameter with API key from process.env.API_KEY
-// Fallback to a dummy key to prevent early crash when API key is not configured in .env
-const apiKeyVal = (typeof process !== 'undefined' && process.env && process.env.API_KEY) || "DUMMY_KEY";
+const apiKeyVal = process.env.API_KEY || process.env.GEMINI_API_KEY || "DUMMY_KEY";
 const ai = new GoogleGenAI({ apiKey: apiKeyVal });
 
 export const extractPatientDataFromId = async (base64Image: string, mimeType: string) => {
