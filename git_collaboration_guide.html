@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Git Team Collaboration Guide</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #eff6ff;
+            --dark: #0f172a;
+            --gray: #64748b;
+            --light: #f8fafc;
+            --border: #e2e8f0;
+            --accent: #d946ef;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            color: var(--dark);
+            background-color: var(--light);
+            line-height: 1.6;
+            margin: 0;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+            border: 1px solid var(--border);
+        }
+
+        h1, h2, h3 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            color: var(--dark);
+            margin-top: 0;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 12px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            margin-top: 30px;
+            border-left: 4px solid var(--accent);
+            padding-left: 12px;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        p {
+            color: var(--gray);
+            font-size: 0.95rem;
+        }
+
+        .diagram-box {
+            background-color: var(--light);
+            border: 1px dashed var(--gray);
+            border-radius: 16px;
+            padding: 24px;
+            margin: 20px 0;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .branch-node {
+            background: white;
+            border: 2px solid var(--primary);
+            border-radius: 12px;
+            padding: 12px 18px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.02);
+            font-size: 0.85rem;
+        }
+
+        .branch-node.main {
+            border-color: var(--dark);
+            background: var(--dark);
+            color: white;
+        }
+
+        .arrow {
+            font-size: 1.5rem;
+            color: var(--gray);
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            color: var(--gray);
+            font-size: 0.95rem;
+        }
+
+        pre {
+            background-color: var(--light);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            color: #334155;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        .tip-box {
+            background-color: var(--primary-light);
+            border-left: 4px solid var(--primary);
+            padding: 16px;
+            border-radius: 12px;
+            margin: 20px 0;
+        }
+
+        .tip-box p {
+            color: #1e3a8a;
+            margin: 0;
+            font-weight: 500;
+        }
+
+        @media print {
+            body {
+                background-color: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+                border: none;
+                padding: 0;
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Git Team Collaboration Guide</h1>
+        <p>This document describes the exact Git-based SCM workflow for coordinating frontend UI features (using Antigravity on Windows) and backend database logic (on macOS).</p>
+
+        <h2>1. SCM Branch Strategy</h2>
+        <p>To ensure code remains clean and unified, both developers commit to specialized branches, combining updates via Pull Requests:</p>
+
+        <div class="diagram-box">
+            <div class="branch-node main">main Branch<br><small>Stable & Unified</small></div>
+            <div class="arrow">↔</div>
+            <div class="branch-node">ui-features Branch<br><small>Frontend / UI Widgets</small></div>
+            <div class="arrow">↔</div>
+            <div class="branch-node">backend-storage Branch<br><small>Database / Schema Setup</small></div>
+        </div>
+
+        <ul>
+            <li><strong>main:</strong> The stable core. Serves as the unified application deployed to testing/production.</li>
+            <li><strong>ui-features (Your branch):</strong> Where Antigravity pushes layout changes and Frontend updates.</li>
+            <li><strong>backend-storage (Backend branch):</strong> Where the backend developer manages database tables, schemas, and API routes.</li>
+        </ul>
+
+        <h2>2. macOS Backend Developer Setup</h2>
+        <p>The backend developer executes the following setup commands on their Mac:</p>
+        <pre># 1. Clone the repository
+git clone https://github.com/agrawalmohit007/new-om-emr-.git
+cd new-om-emr-
+
+# 2. Install dependencies & configure local environment
+npm install
+cp .env.example .env
+
+# 3. Create and push the backend branch
+git checkout -b backend-storage
+git add .
+git commit -m "Implement data storage and database integration"
+git push -u origin backend-storage</pre>
+
+        <h2>3. Your Daily Frontend Workflow (with Antigravity)</h2>
+        <p>When you request UI additions or layout adjustments, Antigravity automates these Git steps:</p>
+        <pre># 1. Pull the backend updates from main
+git pull origin main
+
+# 2. Code updates and compile verification
+
+# 3. Commit and push to UI branch
+git checkout -b ui-features
+git add .
+git commit -m "UI: Complete EMR layout and autocompletions"
+git push origin ui-features</pre>
+
+        <div class="tip-box">
+            <p>💡 Tip: Merges will automatically execute successfully on GitHub since frontend design and backend database schemas reside in separate code files.</p>
+        </div>
+    </div>
+</body>
+</html>
