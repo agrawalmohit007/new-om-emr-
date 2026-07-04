@@ -56,6 +56,44 @@ const USG_INDICATIONS = [
   "xxiii. Research/scientific studies in recognized institutions"
 ];
 
+const COMPLAINT_GROUPS = [
+  {
+    category: "Routine ANC",
+    items: [
+      { label: "Routine ANC Visit", text: "Amenorrhea since [X] months, routine antenatal check-up. No specific complaints." },
+      { label: "Gestational Pain", text: "Amenorrhea since [X] months, complains of mild lower abdominal pain / uterine irritability." },
+      { label: "Nausea/Vomiting", text: "Amenorrhea since [X] weeks, complains of excessive vomiting and nausea." },
+      { label: "Decreased Movements", text: "Amenorrhea since [X] weeks, complains of perceived decrease in fetal movements." }
+    ]
+  },
+  {
+    category: "OB Emergencies",
+    items: [
+      { label: "Bleeding PV", text: "Amenorrhea since [X] weeks, complains of spotting / bleeding per vaginam." },
+      { label: "Leaking PV (PROM)", text: "Amenorrhea since [X] weeks, complains of sudden watery discharge per vaginam (leaking PV)." },
+      { label: "Preeclampsia symptoms", text: "Amenorrhea since [X] weeks, complains of severe headache, blurring of vision, and pedal edema." },
+      { label: "Labor Pains", text: "Amenorrhea since [X] weeks, complains of painful abdominal contractions (labor pains)." }
+    ]
+  },
+  {
+    category: "Menstrual & Gynae",
+    items: [
+      { label: "Menorrhagia", text: "Complains of heavy menstrual bleeding (passage of clots) during cycles." },
+      { label: "Dysmenorrhea", text: "Complains of severe lower abdominal spasmodic pain during menstruation." },
+      { label: "Oligomenorrhea", text: "Complains of irregular, delayed menstrual cycles." },
+      { label: "Postmenopausal Bleeding", text: "Complains of bleeding per vaginam after menopause." }
+    ]
+  },
+  {
+    category: "Infections & General",
+    items: [
+      { label: "Vaginal Discharge", text: "Complains of excessive white discharge per vaginam, foul smell." },
+      { label: "Chronic Pelvic Pain", text: "Complains of persistent lower abdominal pain and backache." },
+      { label: "Infertility Workup", text: "Active married life since [X] years, complains of inability to conceive." }
+    ]
+  }
+];
+
 const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ 
   doctorName, patients, visits, labOrders, clinicalTemplates, medicationMaster, pharmacyInventory = [], pharmacySales = [], printSettings, billingRates = DEFAULT_PRICES, ipdAdmissions = [], consultants = [], wards = [], onUpdateVisits, onUpdatePatients, onUpdateTemplates, onOrderLab, onCancelOrder, onCallPatient, onAddAdmission
 }) => {
@@ -97,6 +135,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const [localRemarks, setLocalRemarks] = useState('');
   const [localFollowUpDate, setLocalFollowUpDate] = useState('');
   const [localCustomFields, setLocalCustomFields] = useState<Record<string, string>>({});
+  const [showQuickComplaints, setShowQuickComplaints] = useState(false);
 
   // --- QUICK ADD PATIENT STATE ---
   const [showQuickAddPatientModal, setShowQuickAddPatientModal] = useState(false);
@@ -1413,9 +1452,38 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2 mb-3">{config.label}</h3>
             <textarea value={localComplaints} onChange={e => setLocalComplaints(e.target.value)} className="w-full h-16 text-sm bg-white border border-slate-200 rounded-xl px-4 py-2 font-bold focus:ring-4 focus:ring-blue-50 outline-none transition-all resize-none text-slate-800" placeholder="Primary complaints..."/>
             <div className="absolute top-6 right-6 flex gap-1">
+              <button onClick={() => setShowQuickComplaints(prev => !prev)} className={`p-1 rounded-lg border text-sm shadow-sm transition-all ${showQuickComplaints ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white hover:bg-slate-100 border-slate-100'}`} title="Quick Templates">✨</button>
               <button onClick={() => setTemplateConfig({ isOpen: true, type: 'complaints' })} className="bg-white hover:bg-slate-100 p-1 rounded-lg border border-slate-100 text-sm shadow-sm transition-all" title="Load Template">📋</button>
               <button onClick={() => handleSaveTemplate('complaints', localComplaints)} className="bg-white hover:bg-slate-100 p-1 rounded-lg border border-slate-100 text-sm shadow-sm transition-all" title="Save Template">💾</button>
             </div>
+            {showQuickComplaints && (
+              <div className="mt-4 pt-3 border-t border-slate-200 space-y-3">
+                <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest block">Select Quick Template:</span>
+                <div className="space-y-2.5">
+                  {COMPLAINT_GROUPS.map((group, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">{group.category}</span>
+                      <div className="flex flex-wrap gap-1">
+                        {group.items.map((item, itemIdx) => (
+                          <button
+                            key={itemIdx}
+                            onClick={() => {
+                              const current = localComplaints.trim();
+                              const appendStr = item.text;
+                              if (current.includes(item.text)) return;
+                              setLocalComplaints(prev => prev ? `${prev}\n${appendStr}` : appendStr);
+                            }}
+                            className="bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg px-2.5 py-1 text-[9px] font-bold text-slate-600 hover:text-blue-700 transition"
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         );
       case 'obstetricHistory':
