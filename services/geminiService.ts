@@ -793,3 +793,20 @@ CRITICAL MEDICAL & AUTOFILL RULES:
     return safeJsonParse(response.text);
 };
 
+export const generatePrintText = async (promptText: string, type: 'header' | 'footer'): Promise<string> => {
+    const prompt = `You are an expert EMR assistant. Generate a highly professional clinical ${type} text block for a doctor's letterhead/prescription pad based on the following input details: "${promptText}".
+    
+    Format requirements:
+    - Return ONLY the clean formatted text.
+    - If it is a header, design a professional clinic title layout with doctor qualifications, specialties, and contact.
+    - If it is a footer, design terms of visit, follow-up guidelines, and a signature line spacer.
+    - Do NOT wrap in markdown code blocks.`;
+    
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+    });
+    
+    return response.text.trim();
+};
+

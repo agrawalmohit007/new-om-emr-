@@ -7,13 +7,19 @@ import firebaseConfig from '../firebase-applet-config.json';
 let firestore: any = null;
 
 export const initFirebase = (config: FirebaseConfig): boolean => {
-    if (getApps().length === 0) {
-        const app = initializeApp(firebaseConfig);
-        firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL */
-    } else {
-        firestore = getFirestore(getApp(), firebaseConfig.firestoreDatabaseId);
+    try {
+        if (getApps().length === 0) {
+            const app = initializeApp(firebaseConfig);
+            firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL */
+        } else {
+            firestore = getFirestore(getApp(), firebaseConfig.firestoreDatabaseId);
+        }
+        return true;
+    } catch (e) {
+        console.warn("⚠️ Firebase failed to initialize (device is likely offline):", e);
+        firestore = null;
+        return false;
     }
-    return true;
 };
 
 export const isCloudConfigured = (): boolean => true;
@@ -30,7 +36,20 @@ export const getCloudConfig = (): FirebaseConfig | null => {
 };
 
 export const syncToCloud = async (key: string, data: any) => {
-    if (!firestore) return;
+    // 1. Always save to local server database first (Drizzle/Postgres)
+    try {
+        const cleanData = JSON.parse(JSON.stringify(data));
+        await fetch(`/api/collection/${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ payload: cleanData })
+        });
+    } catch (e) {
+        console.error(`Failed to save ${key} to local server:`, e);
+    }
+
+    // 2. Sync to Firebase Cloud if online and configured
+    if (!firestore || !navigator.onLine) return;
     try {
         const cleanData = JSON.parse(JSON.stringify(data));
         const docRef = doc(firestore, 'omStore', key);
@@ -41,8 +60,6 @@ export const syncToCloud = async (key: string, data: any) => {
 };
 
 export const setupCloudListener = (onUpdate: (key: string, data: any) => void) => {
-    if (!firestore) return () => {};
-    
     const keys = [
         'patients', 'visits', 'labOrders', 'clinicalTemplates', 'notifications', 
         'labInventory', 'reportHistory', 'medicationMaster', 'consultants', 
@@ -50,21 +67,81 @@ export const setupCloudListener = (onUpdate: (key: string, data: any) => void) =
         'pharmacyInventory', 'pharmacySuppliers', 'pharmacySales', 'specialties', 'systemUsers',
         'registryTemplates', 'registryRecords', 'appConfig', 'printSettings'
     ];
-    
-    const unsubs = keys.map(key => {
-        const docRef = doc(firestore, 'omStore', key);
-        return onSnapshot(docRef, (snap) => {
-            if (snap.exists()) {
-                const data = snap.data();
-                if (data && data.payload) {
-                    onUpdate(key, data.payload);
+
+    // 1. Fetch initial data for all collections from the local server computer database at startup
+    keys.forEach(async (key) => {
+        try {
+            const res = await fetch(`/api/collection/${key}`);
+            if (res.ok) {
+                const result = await res.json();
+                if (result && result.payload !== undefined) {
+                    onUpdate(key, result.payload);
                 }
             }
-        });
+        } catch (e) {
+            console.warn(`Failed to fetch initial ${key} from local server:`, e);
+        }
     });
-    
+
+    // 2. Set up SSE (Server-Sent Events) listener for local server updates
+    let eventSource: EventSource | null = null;
+    try {
+        eventSource = new EventSource('/api/stream');
+        eventSource.onmessage = async (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data && data.collection) {
+                    const res = await fetch(`/api/collection/${data.collection}`);
+                    if (res.ok) {
+                        const result = await res.json();
+                        if (result && result.payload !== undefined) {
+                            onUpdate(data.collection, result.payload);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Error parsing local stream event:", e);
+            }
+        };
+    } catch (e) {
+        console.warn("SSE local stream failed to initialize:", e);
+    }
+
+    // 3. Set up Firebase cloud snapshot listeners (if online)
+    let firebaseUnsubs: (() => void)[] = [];
+    if (firestore) {
+        try {
+            firebaseUnsubs = keys.map(key => {
+                const docRef = doc(firestore, 'omStore', key);
+                return onSnapshot(docRef, async (snap) => {
+                    if (snap.exists()) {
+                        const data = snap.data();
+                        if (data && data.payload !== undefined) {
+                            onUpdate(key, data.payload);
+                            // Sync cloud updates back to local server
+                            try {
+                                await fetch(`/api/collection/${key}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ payload: data.payload })
+                                });
+                            } catch (e) {
+                                // Quiet ignore
+                            }
+                        }
+                    }
+                }, (err) => {
+                    console.warn(`Firebase snapshot listener error for ${key}:`, err);
+                });
+            });
+        } catch (e) {
+            console.warn("Failed to setup Firebase listeners:", e);
+        }
+    }
+
     return () => {
-        unsubs.forEach(u => u());
+        if (eventSource) eventSource.close();
+        firebaseUnsubs.forEach(u => u());
     };
 };
 
