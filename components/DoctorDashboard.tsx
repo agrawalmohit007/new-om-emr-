@@ -3,8 +3,9 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Patient, VisitRecord, LabOrder, SelectedTests, ClinicalTemplate, PregnancyInfo, Vitals, MedicationMasterData, AppPrintSettings, ServicePrices, HormoneReportSelection, PharmacyItem, IpdAdmission, PharmacySale, Consultant } from '../types';
 import ReportPreview from './ReportPreview';
 import { syncToCloud } from '../services/firebaseService';
+import { useVoiceDictation } from '../services/voiceService';
 import { calculateLabFeesForOrder, DEFAULT_PRICES } from '../services/billingService';
-import { translateMedicalText, predictPrescription, extractPrescriptionFromImage, executeAiComplete } from '../services/geminiService';
+import { translateMedicalText, predictPrescription, extractPrescriptionFromImage, executeAiComplete, chatWithClinicalAssistant } from '../services/geminiService';
 import { numberToWords } from '../services/numberToWords';
 
 interface DoctorDashboardProps {
@@ -21,13 +22,16 @@ interface DoctorDashboardProps {
   ipdAdmissions?: IpdAdmission[];
   consultants?: Consultant[];
   wards?: import('../types').Ward[];
-  onUpdateVisits: (v: VisitRecord[]) => void;
+  onUpdateVisits: (v: VisitRecord[] | ((prev: VisitRecord[]) => VisitRecord[])) => void;
   onUpdatePatients: (p: Patient[]) => void;
   onUpdateTemplates: (t: ClinicalTemplate[]) => void;
   onOrderLab: (o: LabOrder) => void;
   onCancelOrder: (id: string) => void;
   onCallPatient: (name: string) => void;
   onAddAdmission?: (admission: IpdAdmission) => void;
+  registryTemplates?: import('../types').RegistryTemplate[];
+  registryRecords?: import('../types').RegistryRecord[];
+  onUpdateRecords?: (r: import('../types').RegistryRecord[]) => void;
 }
 
 const USG_INDICATIONS = [
@@ -78,27 +82,45 @@ const COMPLAINT_GROUPS = [
   {
     category: "Menstrual & Gynae",
     items: [
-      { label: "Menorrhagia", text: "Complains of heavy menstrual bleeding (passage of clots) during cycles." },
-      { label: "Dysmenorrhea", text: "Complains of severe lower abdominal spasmodic pain during menstruation." },
-      { label: "Oligomenorrhea", text: "Complains of irregular, delayed menstrual cycles." },
-      { label: "Postmenopausal Bleeding", text: "Complains of bleeding per vaginam after menopause." }
+      { label: "Menorrhagia", text: "Complains of heavy menstrual bleeding (passage of clots) during cycles for [Duration]." },
+      { label: "Dysmenorrhea", text: "Complains of severe lower abdominal spasmodic pain during menstruation for [Duration]." },
+      { label: "Oligomenorrhea", text: "Complains of irregular, delayed menstrual cycles for [Duration]." },
+      { label: "Postmenopausal Bleeding", text: "Complains of bleeding per vaginam after menopause for [Duration]." }
     ]
   },
   {
     category: "Infections & General",
     items: [
-      { label: "Vaginal Discharge", text: "Complains of excessive white discharge per vaginam, foul smell." },
-      { label: "Chronic Pelvic Pain", text: "Complains of persistent lower abdominal pain and backache." },
-      { label: "Infertility Workup", text: "Active married life since [X] years, complains of inability to conceive." }
+      { label: "Vaginal Discharge", text: "Complains of excessive white discharge per vaginam with foul smell for [Duration]." },
+      { label: "Chronic Pelvic Pain", text: "Complains of persistent lower abdominal pain and backache for [Duration]." },
+      { label: "Infertility Workup", text: "Active married life since [Duration], complains of inability to conceive." },
+      { label: "Fever", text: "Complains of high-grade fever with chills for [Duration]." },
+      { label: "Cough", text: "Complains of dry cough and mild breathlessness for [Duration]." },
+      { label: "Loose Motion", text: "Complains of multiple episodes of loose watery stools and abdominal cramps for [Duration]." }
     ]
   }
 ];
 
 const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ 
-  doctorName, patients, visits, labOrders, clinicalTemplates, medicationMaster, pharmacyInventory = [], pharmacySales = [], printSettings, billingRates = DEFAULT_PRICES, ipdAdmissions = [], consultants = [], wards = [], onUpdateVisits, onUpdatePatients, onUpdateTemplates, onOrderLab, onCancelOrder, onCallPatient, onAddAdmission
+  doctorName, patients, visits, labOrders, clinicalTemplates, medicationMaster, pharmacyInventory = [], pharmacySales = [], printSettings, billingRates = DEFAULT_PRICES, ipdAdmissions = [], consultants = [], wards = [], onUpdateVisits, onUpdatePatients, onUpdateTemplates, onOrderLab, onCancelOrder, onCallPatient, onAddAdmission, registryTemplates = [], registryRecords = [], onUpdateRecords
 }) => {
-  const [activeTab, setActiveTab] = useState<'stats' | 'queue' | 'edd'>('queue');
+  const [activeTab, setActiveTab] = useState<'stats' | 'queue' | 'edd' | 'mtp'>('queue');
   
+  // MTP Compliance State hooks
+  const [mtpSelectedPatientId, setMtpSelectedPatientId] = useState<string>('');
+  const [mtpMethod, setMtpMethod] = useState<'medical' | 'surgical' | ''>('');
+  const [mtpIndication, setMtpIndication] = useState<string>('');
+  const [mtpContraception, setMtpContraception] = useState<string>('None');
+  const [mtpMaritalStatus, setMtpMaritalStatus] = useState<string>('Married');
+  const [mtpConsentVerified, setMtpConsentVerified] = useState<boolean>(false);
+  const [mtpSecondRmpName, setMtpSecondRmpName] = useState<string>('');
+  const [mtpSecondRmpReg, setMtpSecondRmpReg] = useState<string>('');
+  const [showReprintModal, setShowReprintModal] = useState<boolean>(false);
+  const [reprintPin, setReprintPin] = useState<string>('');
+  const [reprintReason, setReprintReason] = useState<string>('');
+  const [reprintActiveRecordId, setReprintActiveRecordId] = useState<string | null>(null);
+  const [mtpTabDocView, setMtpTabDocView] = useState<'doc-form-c' | 'doc-form-i' | 'doc-consent'>('doc-form-c');
+
   // Dashboard Drill-down state
   const [dashboardView, setDashboardView] = useState<'overview' | 'rx_stats' | 'opd_stats' | 'ipd_stats' | 'report_stats'>('overview');
   const [dashSearch, setDashSearch] = useState('');
@@ -137,6 +159,63 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   const [localFollowUpDate, setLocalFollowUpDate] = useState('');
   const [localCustomFields, setLocalCustomFields] = useState<Record<string, string>>({});
   const [showQuickComplaints, setShowQuickComplaints] = useState(false);
+  const [showPastInvestigationsModal, setShowPastInvestigationsModal] = useState(false);
+  const [suggestedDrugs, setSuggestedDrugs] = useState<string[]>([]);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'assistant'; content: string; structured?: any }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+
+  const { isRecording: isConversationRecording, start: startConversationDictation, stop: stopConversationDictation } = useVoiceDictation(async (text) => {
+      setIsVoiceProcessing(true);
+      setIsCompleteActive(true);
+      try {
+          const response = await fetch('/api/parseConsultationConversation', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text })
+          });
+          if (response.ok) {
+              const data = await response.json();
+              if (data.complaints) setLocalComplaints(data.complaints);
+              if (data.obstetricHistory) setLocalVisitOH(data.obstetricHistory);
+              if (data.menstrualHistory) setLocalMH(data.menstrualHistory);
+              if (data.generalNotes) setLocalGenNotes(data.generalNotes);
+              if (data.physicalExam) setLocalPhysExam(data.physicalExam);
+              if (data.bp) setLocalBp(data.bp);
+              if (data.pulse) setLocalPulse(data.pulse);
+              if (data.weight) setLocalWeight(data.weight);
+              if (data.spo2) setLocalSpo2(data.spo2);
+              if (data.rx) setLocalRx(data.rx);
+              if (data.remarks) setLocalRemarks(data.remarks);
+              if (data.lmp) {
+                  setLocalLmp(data.lmp);
+                  calculateEdd(data.lmp);
+              }
+              alert("Consultation conversation transcribed and EMR fields populated!");
+          } else {
+              alert("Failed to parse consultation conversation.");
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Error parsing consultation conversation.");
+      } finally {
+          setIsVoiceProcessing(false);
+          setIsCompleteActive(false);
+      }
+  });
+
+  // --- QUICK TEMPLATE PROMPT MODAL STATE ---
+  const [templatePromptConfig, setTemplatePromptConfig] = useState<{
+      isOpen: boolean;
+      label: string;
+      rawText: string;
+      category: string;
+  } | null>(null);
+  const [promptLmp, setPromptLmp] = useState('');
+  const [promptDuration, setPromptDuration] = useState('');
 
   // --- QUICK ADD PATIENT STATE ---
   const [showQuickAddPatientModal, setShowQuickAddPatientModal] = useState(false);
@@ -162,6 +241,764 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
     }
     return [];
   });
+
+  const handleApplyQuickTemplate = () => {
+      if (!templatePromptConfig || !selectedPatient) return;
+      const { label, rawText, category } = templatePromptConfig;
+      
+      const isANC = selectedPatient.type === 'obstetric';
+      let parsedComplaints = rawText;
+      
+      if (isANC) {
+          const lmpDateStr = promptLmp || new Date().toISOString().split('T')[0];
+          setLocalLmp(lmpDateStr);
+          calculateEdd(lmpDateStr);
+          
+          const lmpDate = new Date(lmpDateStr);
+          const today = new Date();
+          const timeDiff = today.getTime() - lmpDate.getTime();
+          const days = timeDiff > 0 ? Math.floor(timeDiff / (1000 * 60 * 60 * 24)) : 0;
+          const weeks = Math.floor(days / 7);
+          const months = Math.floor(days / 30);
+          
+          parsedComplaints = parsedComplaints
+              .replace(/\[X\] months/g, `${months} months`)
+              .replace(/\[X\] weeks/g, `${weeks} weeks`);
+              
+          setLocalComplaints(prev => prev ? `${prev}\n${parsedComplaints}` : parsedComplaints);
+          
+          setLocalPhysExam(`Uterus size: ${weeks} weeks, FHS: Normal, presentation: cephalic.`);
+          setLocalRx("Tab Calcium 500mg - 1 daily\nTab Iron 100mg - 1 daily");
+          setLocalRemarks("Routine ANC monitoring. Follow up in 2 weeks.");
+          
+          const followUp = new Date();
+          followUp.setDate(followUp.getDate() + 14);
+          setLocalFollowUpDate(followUp.toISOString().split('T')[0]);
+      } else {
+          const durationText = promptDuration.trim() || "10 days";
+          
+          parsedComplaints = parsedComplaints
+              .replace(/\[Duration\]/g, durationText)
+              .replace(/\[X\] years/g, durationText);
+              
+          if (promptLmp) {
+              setLocalLmp(promptLmp);
+              parsedComplaints += ` LMP: ${promptLmp}.`;
+          }
+          
+          setLocalComplaints(prev => prev ? `${prev}\n${parsedComplaints}` : parsedComplaints);
+          
+          setLocalPhysExam("Per abdomen: Soft, non-tender. Speculum examination: normal.");
+          setLocalRemarks("USG Pelvis advised. Follow up with reports.");
+          
+          if (label === "Menorrhagia") {
+              setLocalRx("Tab Tranexamic Acid 500mg - thrice daily during bleeding\nTab Mefenamic Acid 500mg - thrice daily if painful");
+          } else if (label === "Vaginal Discharge") {
+              setLocalRx("Tab Fluconazole 150mg - single dose\nCap Doxycycline 100mg - twice daily for 7 days");
+          } else if (label === "Fever") {
+              setLocalRx("Tab Paracetamol 650mg - 3 times daily for 3 days\nTab Amoxicillin 500mg - 3 times daily for 5 days");
+          } else if (label === "Cough") {
+              setLocalRx("Syr Levocetirizine + Montelukast - 5ml at bedtime\nTab Azithromycin 500mg - once daily for 3 days");
+          } else if (label === "Loose Motion") {
+              setLocalRx("Tab Ofloxacin 200mg + Ornidazole 500mg - twice daily for 3 days\nORS sachet - as required");
+          }
+      }
+      
+      setTemplatePromptConfig(null);
+  };
+
+  const hasRepeatedAbortion = (patient: any, localVisitOH: string) => {
+    const combinedText = [
+      patient?.obstetricHistory || '',
+      localVisitOH || ''
+    ].join(' ').toLowerCase();
+
+    const abortionMatch = combinedText.match(/\ba\s*(\d+)\b/) || 
+                          combinedText.match(/\babortion[s]?\s*(?::|s)?\s*(\d+)\b/);
+    if (abortionMatch) {
+      const count = parseInt(abortionMatch[1], 10);
+      if (count >= 2) return true;
+    }
+    return combinedText.includes("recurrent loss") || 
+           combinedText.includes("recurrent abortion") || 
+           combinedText.includes("habitual abortion");
+  };
+
+  const isRhNegative = (patient: any, localVisitOH: string, examText: string) => {
+    const combinedText = [
+      patient?.obstetricHistory || '',
+      localVisitOH || '',
+      examText || '',
+      JSON.stringify(patient?.customFields || {})
+    ].join(' ').toLowerCase();
+
+    const negPatterns = [
+      /\b(a|b|o|ab)\s*(negative|-ve|-)\b/,
+      /\brh\s*(negative|-ve|-)\b/
+    ];
+    return negPatterns.some(pattern => pattern.test(combinedText));
+  };
+
+  const checkSizeDatesDiscrepancy = (calculatedWeeks: number, examText: string) => {
+    if (!examText) return null;
+    const combined = examText.toLowerCase();
+
+    const sizeMatch = combined.match(/\b(?:ut|uterus|size|sfh)\s*(?:size)?\s*(?:of)?\s*(\d+)\s*(?:weeks?|w|cm)?\b/) ||
+                      combined.match(/\b(\d+)\s*(?:weeks?|w)\s*(?:size)\b/);
+    if (sizeMatch) {
+      const sizeWeeks = parseInt(sizeMatch[1], 10);
+      if (!isNaN(sizeWeeks) && sizeWeeks > 4 && sizeWeeks < 45) {
+        const diff = calculatedWeeks - sizeWeeks;
+        if (diff >= 3) {
+          return { type: 'lag', calculated: calculatedWeeks, examSize: sizeWeeks };
+        } else if (diff <= -3) {
+          return { type: 'lead', calculated: calculatedWeeks, examSize: sizeWeeks };
+        }
+      }
+    }
+    return null;
+  };
+
+  const extractDrugsFromRxText = (rxText: string) => {
+    if (!rxText) return [];
+    return rxText.split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => {
+            const words = line.split(/\s+/);
+            if (words.length > 0) {
+                const prefix = words[0].toLowerCase();
+                if (['tab', 'cap', 'inj', 'syr', 'susp', 'tab.', 'cap.', 'inj.', 'syr.'].includes(prefix)) {
+                    return words.slice(0, Math.min(words.length, 3)).join(' ');
+                }
+                return words.slice(0, Math.min(words.length, 2)).join(' ');
+            }
+            return line;
+        });
+  };
+
+  const getVisitFeatureVector = (patientType: string, pogText: string, bpText: string) => {
+    let trimester: 'first' | 'second' | 'third' | undefined;
+    if (patientType === 'obstetric' && pogText) {
+        const match = pogText.match(/\d+/);
+        if (match) {
+            const weeks = parseInt(match[0], 10);
+            if (weeks <= 12) trimester = 'first';
+            else if (weeks <= 28) trimester = 'second';
+            else trimester = 'third';
+        }
+    }
+
+    let hypertensive = false;
+    if (bpText) {
+        const bpMatch = bpText.match(/(\d+)\s*\/\s*(\d+)/);
+        if (bpMatch) {
+            const systolic = parseInt(bpMatch[1], 10);
+            const diastolic = parseInt(bpMatch[2], 10);
+            if (systolic >= 140 || diastolic >= 90) {
+                hypertensive = true;
+            }
+        }
+    }
+
+    return {
+        patientType: patientType === 'obstetric' ? 'obstetric' as const : 'general' as const,
+        trimester,
+        hypertensive
+    };
+  };
+
+  const savePrescribingHabits = (docName: string, feature: any, drugs: string[]) => {
+    if (drugs.length === 0) return;
+    try {
+        const key = `doctor_habits_${docName}`;
+        const existingDataStr = localStorage.getItem(key);
+        const habits: { feature: any; drug: string; count: number }[] = existingDataStr ? JSON.parse(existingDataStr) : [];
+
+        for (const drug of drugs) {
+            const existing = habits.find(h => 
+                h.feature.patientType === feature.patientType &&
+                h.feature.trimester === feature.trimester &&
+                h.feature.hypertensive === feature.hypertensive &&
+                h.drug.toLowerCase() === drug.toLowerCase()
+            );
+
+            if (existing) {
+                existing.count += 1;
+            } else {
+                habits.push({ feature, drug, count: 1 });
+            }
+        }
+
+        habits.sort((a, b) => b.count - a.count);
+        localStorage.setItem(key, JSON.stringify(habits.slice(0, 200)));
+    } catch (e) {
+        console.warn("Failed to save prescribing habits:", e);
+    }
+  };
+
+  const getPrescribingSuggestions = (docName: string, feature: any): string[] => {
+    try {
+        const key = `doctor_habits_${docName}`;
+        const existingDataStr = localStorage.getItem(key);
+        if (!existingDataStr) return [];
+        const habits: { feature: any; drug: string; count: number }[] = JSON.parse(existingDataStr);
+
+        const matches = habits.filter(h => 
+            h.feature.patientType === feature.patientType &&
+            (feature.patientType !== 'obstetric' || h.feature.trimester === feature.trimester) &&
+            h.feature.hypertensive === feature.hypertensive
+        );
+
+        return matches.slice(0, 4).map(m => m.drug);
+    } catch (e) {
+        return [];
+    }
+  };
+
+  const getSafetyAlerts = (rxText: string, patient: Patient | null) => {
+    const alerts: { type: 'red' | 'orange' | 'yellow'; icon: string; message: string }[] = [];
+    if (!rxText) return alerts;
+
+    const lowerRx = rxText.toLowerCase();
+
+    if (patient && patient.customFields?.allergies) {
+        const allergies = patient.customFields.allergies.toLowerCase().split(/,\s*/);
+        for (const allergy of allergies) {
+            if (allergy.trim() && lowerRx.includes(allergy.trim())) {
+                alerts.push({
+                    type: 'red',
+                    icon: '🔴',
+                    message: `Allergy Warning: Prescription matches patient allergy "${allergy.trim()}"!`
+                });
+            }
+        }
+    }
+    if (patient && patient.obstetricHistory) {
+        const historyLower = patient.obstetricHistory.toLowerCase();
+        const allergyMatches = historyLower.match(/allerg(?:y|ic)\s+(?:to\s+)?([a-z0-9\s]+)/i);
+        if (allergyMatches && allergyMatches[1]) {
+            const allergy = allergyMatches[1].trim();
+            if (lowerRx.includes(allergy)) {
+                alerts.push({
+                    type: 'red',
+                    icon: '🔴',
+                    message: `Allergy Warning: Prescription matches history-noted allergy to "${allergy}"!`
+                });
+            }
+        }
+    }
+
+    if (patient && patient.type === 'obstetric') {
+        const unsafeDrugs = [
+            { name: 'warfarin', cat: 'X', msg: 'Teratogenic (causes skeletal abnormalities/bleeding)' },
+            { name: 'methotrexate', cat: 'X', msg: 'Folic acid antagonist, causes major congenital anomalies' },
+            { name: 'misoprostol', cat: 'X', msg: 'Causes uterine contractions and abortion (contraindicated in pregnancy preservation)' },
+            { name: 'lisinopril', cat: 'D', msg: 'ACE Inhibitor, causes fetal renal dysfunction and oligohydramnios' },
+            { name: 'enalapril', cat: 'D', msg: 'ACE Inhibitor, causes fetal renal dysfunction' },
+            { name: 'losartan', cat: 'D', msg: 'ARB, causes fetal skull hypoplasia and renal failure' },
+            { name: 'telmisartan', cat: 'D', msg: 'ARB, causes fetal renal failure' },
+            { name: 'atorvastatin', cat: 'X', msg: 'Statin, disrupts fetal cholesterol synthesis' },
+            { name: 'simvastatin', cat: 'X', msg: 'Statin, disrupts fetal cholesterol synthesis' },
+            { name: 'phenytoin', cat: 'D', msg: 'Fetal Hydantoin Syndrome (cleft palate, heart defects)' },
+            { name: 'carbamazepine', cat: 'D', msg: 'Causes neural tube defects (spina bifida)' },
+            { name: 'valproate', cat: 'X', msg: 'Sodium Valproate: High risk of neural tube defects & developmental delay' },
+            { name: 'aspirin', cat: 'D', msg: 'High doses (>150mg) in 3rd trimester cause premature closure of ductus arteriosus' },
+            { name: 'ibuprofen', cat: 'D', msg: 'NSAID: Avoid in 3rd trimester, risk of premature ductus closure and oligohydramnios' },
+            { name: 'diclofenac', cat: 'D', msg: 'NSAID: Avoid in 3rd trimester' }
+        ];
+
+        for (const d of unsafeDrugs) {
+            if (lowerRx.includes(d.name)) {
+                alerts.push({
+                    type: 'orange',
+                    icon: '🤰',
+                    message: `Pregnancy Warning: ${d.name.toUpperCase()} is Category ${d.cat} - ${d.msg}`
+                });
+            }
+        }
+    }
+
+    const interactions = [
+        { d1: 'iron', d2: 'calcium', msg: 'Calcium inhibits oral iron absorption. Administer at least 2 hours apart.' },
+        { d1: 'folvite', d2: 'methotrexate', msg: 'Methotrexate is a folate antagonist; co-administration reduces methotrexate efficacy.' },
+        { d1: 'warfarin', d2: 'aspirin', msg: 'Severe bleeding risk: Anticoagulant + Antiplatelet synergistic interaction.' },
+        { d1: 'warfarin', d2: 'ibuprofen', msg: 'Increased risk of gastrointestinal bleeding.' }
+    ];
+
+    for (const inter of interactions) {
+        if (lowerRx.includes(inter.d1) && lowerRx.includes(inter.d2)) {
+            alerts.push({
+                type: 'yellow',
+                icon: '⚡',
+                message: `Interaction: ${inter.d1.toUpperCase()} + ${inter.d2.toUpperCase()} - ${inter.msg}`
+            });
+        }
+    }
+
+    return alerts;
+  };
+
+  const getObstetricRiskSuggestions = (weeks: number) => {
+      const suggestions: { label: string; text: string; category: 'lab' | 'radiology' | 'vaccine' }[] = [];
+      if (!selectedPatient) return suggestions;
+
+      const combinedHistory = [
+          selectedPatient.obstetricHistory || '',
+          localVisitOH || ''
+      ].join(' ').toLowerCase();
+
+      const combinedExam = [
+          localGenNotes || '',
+          localPhysExam || ''
+      ].join(' ').toLowerCase();
+
+      if (hasRepeatedAbortion(selectedPatient, localVisitOH)) {
+          suggestions.push({
+              label: "🔬 Advise APLA Panel (Recurrent Loss Risk)",
+              text: "Antiphospholipid Antibody (APLA) Panel (Lupus Anticoagulant, Anti-cardiolipin IgG/IgM)",
+              category: 'lab'
+          });
+          suggestions.push({
+              label: "🔬 Thyroid Profile & HbA1c (Endocrine Audit)",
+              text: "Thyroid Profile (T3, T4, TSH) & HbA1c screening",
+              category: 'lab'
+          });
+      }
+
+      if (combinedHistory.includes("preterm") || combinedHistory.includes("ptd")) {
+          suggestions.push({
+              label: "🔍 Cervical Length Monitoring USG (14w-16w)",
+              text: "Transvaginal Ultrasonography (TVS) for Cervical Length Evaluation",
+              category: 'radiology'
+          });
+      }
+
+      if (combinedHistory.includes("lscs") || combinedHistory.includes("scar")) {
+          if (weeks >= 32) {
+              suggestions.push({
+                  label: "🔍 Evaluate Scar Thickness on USG",
+                  text: "Ultrasonography (USG) for Lower Uterine Segment (LUS) Scar Thickness",
+                  category: 'radiology'
+              });
+          }
+      }
+
+      if (combinedHistory.includes("pih") || combinedHistory.includes("preeclampsia") || combinedHistory.includes("toxemia")) {
+          suggestions.push({
+              label: "🔬 Baseline PIH Profile (LFT, KFT, Uric Acid)",
+              text: "PIH Profile screening: Complete Blood Count, Liver Function Test (LFT), Kidney Function Test (KFT), Serum Uric Acid",
+              category: 'lab'
+          });
+      }
+
+      if (combinedHistory.includes("gdm") || combinedHistory.includes("diabetes") || combinedHistory.includes("diabetic")) {
+          suggestions.push({
+              label: "🔬 Early Oral Glucose Test (OGTT)",
+              text: "Early Oral Glucose Tolerance Test (OGTT) at booking/12 weeks",
+              category: 'lab'
+          });
+      }
+
+      if (isRhNegative(selectedPatient, localVisitOH, combinedExam)) {
+          suggestions.push({
+              label: "🔬 Indirect Coombs Test (ICT) for Rh-ve Mother",
+              text: "Indirect Coombs Test (ICT) for Rh Isoimmunization evaluation",
+              category: 'lab'
+          });
+          if (weeks >= 26 && weeks <= 30) {
+              suggestions.push({
+                  label: "💉 Inj Anti-D Immunoglobulin (300 mcg) at 28w",
+                  text: "Administration of Prophylactic Inj Anti-D Immunoglobulin (300 mcg) IM",
+                  category: 'vaccine'
+              });
+          }
+      }
+
+      const discrepancy = checkSizeDatesDiscrepancy(weeks, combinedExam);
+      if (discrepancy) {
+          if (discrepancy.type === 'lag') {
+              suggestions.push({
+                  label: `🔍 USG Color Doppler (Size Lag: POG ${discrepancy.calculated}w vs Exam ${discrepancy.examSize}w)`,
+                  text: "Ultrasonography (USG): Obstetric Color Doppler (Rule out IUGR/Oligohydramnios)",
+                  category: 'radiology'
+              });
+          } else if (discrepancy.type === 'lead') {
+              suggestions.push({
+                  label: `🔬 OGTT & 🔍 USG Scan (Size Lead: POG ${discrepancy.calculated}w vs Exam ${discrepancy.examSize}w)`,
+                  text: "Oral Glucose Tolerance Test (OGTT) & Obstetric USG Scan (Rule out Gestational Diabetes / Macrosomia / Polyhydramnios)",
+                  category: 'lab'
+              });
+          }
+      }
+
+      return suggestions;
+  };
+
+  const handleSendChat = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!chatInput.trim() || !selectedPatient) return;
+
+      const userMsg = chatInput;
+      setChatInput('');
+      setChatHistory(prev => [...prev, { role: 'user', content: userMsg }]);
+      setIsChatLoading(true);
+
+      try {
+          const contextParts = [
+              `Patient Name: ${selectedPatient.name}`,
+              `Age: ${selectedPatient.age}`,
+              `Mobile: ${selectedPatient.mobile}`,
+              `Complaints: ${localComplaints}`,
+              `General Notes: ${localGenNotes}`,
+              `Obstetric History: ${localVisitOH}`,
+              `Menstrual History: ${localMH}`,
+              `LMP: ${localLmp}`,
+              `EDD: ${localEdd}`,
+              `POG: ${localPog}`,
+              `Vitals: Pulse ${localPulse}, BP ${localBp}, Weight ${localWeight}, SpO2 ${localSpo2}, Height ${localHeight}`,
+              `Physical Exam: ${localPhysExam}`,
+              `Current Rx: ${localRx}`,
+              `Remarks: ${localRemarks}`,
+              `Follow-up Date: ${localFollowUpDate}`
+          ];
+          const patientContext = contextParts.join('\n');
+
+          const formattedHistory = chatHistory.map(h => ({
+              role: h.role === 'user' ? 'user' as const : 'model' as const,
+              content: h.content
+          }));
+
+          const responseText = await chatWithClinicalAssistant(chatHistory, patientContext);
+          const structured = parseStructuredChatResponse(responseText);
+
+          setChatHistory(prev => [...prev, { 
+              role: 'assistant', 
+              content: responseText, 
+              structured 
+          }]);
+      } catch (err) {
+          console.error("Clinical Chat Failed:", err);
+          setChatHistory(prev => [...prev, { role: 'assistant', content: "Failed to connect to AI Assistant. Please check API Key and try again." }]);
+      } finally {
+          setIsChatLoading(false);
+      }
+  };
+
+  const parseStructuredChatResponse = (text: string) => {
+      try {
+          const jsonMatch = text.match(/```json\s*(\{[\s\S]*?\})\s*```/) || text.match(/(\{[\s\S]*?\})/);
+          if (jsonMatch) {
+              const data = JSON.parse(jsonMatch[1]);
+              if (data.prescription || data.remarks || data.diagnosis) {
+                  return data;
+              }
+          }
+      } catch (e) {
+          // Ignore
+      }
+      return null;
+  };
+
+  const handleApplyAiChatSuggestions = (structured: any) => {
+      if (structured.prescription) {
+          setLocalRx(prev => `${prev}${prev ? '\n' : ''}${structured.prescription}`);
+      }
+      if (structured.remarks) {
+          setLocalRemarks(prev => `${prev}${prev ? '\n' : ''}${structured.remarks}`);
+      }
+      if (structured.diagnosis) {
+          setLocalComplaints(prev => `${prev}${prev ? '\n' : ''}Diagnosis: ${structured.diagnosis}`);
+      }
+      alert("AI suggestions applied to case sheet!");
+  };
+
+  const isInfertilityCase = () => {
+      if (!selectedPatient) return false;
+      if (selectedPatient.type === 'infertility') return true;
+      const complaintsLower = (localComplaints || '').toLowerCase();
+      const infertilityPhrases = [
+          'primary infertility',
+          'secondary infertility',
+          'eager to conceive',
+          'not able to conceive',
+          'want infertility treatment',
+          'infertility',
+          'unable to conceive',
+          'trying to conceive',
+          'difficulty conceiving'
+      ];
+      return infertilityPhrases.some(phrase => complaintsLower.includes(phrase));
+  };
+
+  const isGynecologyCase = () => {
+      if (!selectedPatient) return false;
+      if (selectedPatient.type === 'gynecology') return true;
+      if (isInfertilityCase()) return true;
+      const complaintsLower = (localComplaints || '').toLowerCase();
+      const gynPhrases = [
+          'white discharge', 'vaginal discharge', 'leukorrhea',
+          'heavy bleeding', 'menorrhagia', 'excessive bleeding',
+          'irregular period', 'irregular cycle', 'oligomenorrhea',
+          'dysmenorrhea', 'painful period', 'menstrual pain',
+          'fibroid', 'adenomyosis', 'polyp',
+          'dyspareunia', 'pain during intercourse',
+          'amenorrhea', 'missed period',
+          'pruritus vulvae', 'itching', 'postmenopausal bleeding'
+      ];
+      return gynPhrases.some(phrase => complaintsLower.includes(phrase));
+  };
+
+  const getGynaeRiskSuggestions = () => {
+      const suggestions: { label: string; text: string; category: 'lab' | 'radiology' | 'vaccine' }[] = [];
+      if (!selectedPatient) return suggestions;
+
+      let cycleDay = 0;
+      if (localLmp) {
+          const today = new Date();
+          const lmpDate = new Date(localLmp);
+          const timeDiff = today.getTime() - lmpDate.getTime();
+          if (timeDiff > 0) {
+              cycleDay = Math.floor(timeDiff / (1000 * 60 * 60 * 24)) + 1;
+          }
+      }
+
+      const isInf = isInfertilityCase();
+      const combinedComplaints = (localComplaints || '').toLowerCase();
+
+      if (isInf) {
+          suggestions.push({
+              label: "🔬 Semen Analysis (Male Partner)",
+              text: "Semen Analysis for the male partner (early evaluation is essential)",
+              category: 'lab'
+          });
+          suggestions.push({
+              label: "🔍 Baseline TVS USG (Day 2-3)",
+              text: "Baseline Transvaginal Ultrasound Scan (TVS) for Antral Follicle Count (AFC) evaluation",
+              category: 'radiology'
+          });
+
+          if (cycleDay >= 1 && cycleDay <= 4) {
+              suggestions.push({
+                  label: "🔬 Day 2-3 Hormonal Profile (FSH, LH, AMH)",
+                  text: "Baseline Follicular Phase Serum FSH, LH, Estradiol (E2), and AMH level assessment",
+                  category: 'lab'
+              });
+          }
+
+          if (cycleDay >= 10 && cycleDay <= 16) {
+              suggestions.push({
+                  label: "🔍 Follicular USG Tracking (Day 10-16)",
+                  text: "Serial USG Folliculometry for ovulation tracking and Endometrial Thickness (ET)",
+                  category: 'radiology'
+              });
+          }
+
+          if (cycleDay >= 19 && cycleDay <= 23) {
+              suggestions.push({
+                  label: "🔬 Day 21 Progesterone Test",
+                  text: "Serum Progesterone level on cycle Day 21 to confirm adequate luteinization",
+                  category: 'lab'
+              });
+          }
+
+          if (combinedComplaints.includes('primary') || combinedComplaints.includes('secondary') || combinedComplaints.includes('infertility')) {
+              suggestions.push({
+                  label: "🔍 HSG Tubal Patency (Day 6-10)",
+                  text: "Hysterosalpingography (HSG) or HyCoSy on Day 6-10 of cycle to check tubal patency",
+                  category: 'radiology'
+              });
+          }
+      }
+
+      const ageVal = parseInt(selectedPatient.age, 10);
+      if (!isNaN(ageVal) && ageVal >= 21 && ageVal <= 65) {
+          suggestions.push({
+              label: "🔬 Pap Smear + HPV DNA test",
+              text: "Cervical cancer screening (Pap Smear + HPV Co-testing)",
+              category: 'lab'
+          });
+      }
+
+      return suggestions;
+  };
+
+  const getDynamicAiInsights = (): { text: string; action?: string; type: 'red' | 'orange' | 'yellow' | 'green' | 'info' }[] => {
+      const insights: { text: string; action?: string; type: 'red' | 'orange' | 'yellow' | 'green' | 'info' }[] = [];
+
+      if (localBp) {
+          const bpMatch = localBp.match(/(\d+)\s*\/\s*(\d+)/);
+          if (bpMatch) {
+              const systolic = parseInt(bpMatch[1], 10);
+              const diastolic = parseInt(bpMatch[2], 10);
+              if (!isNaN(systolic) && !isNaN(diastolic)) {
+                  if (systolic >= 160 || diastolic >= 110) {
+                      insights.push({
+                          text: `🚨 Critical BP: Severe Hypertensive Range (${localBp} mmHg). Assess for preeclampsia symptoms immediately (headache, blurred vision).`,
+                          action: "Advise Urine Albumin dipstick & emergency PIH profile. Monitor BP hourly.",
+                          type: 'red'
+                      });
+                  } else if (systolic >= 140 || diastolic >= 90) {
+                      insights.push({
+                          text: `⚠️ Hypertensive BP: Elevated blood pressure (${localBp} mmHg). Monitor closely for Gestational Hypertension/PIH.`,
+                          action: "Advise Urine Albumin dipstick & PIH Profile (LFT, KFT, Uric acid).",
+                          type: 'orange'
+                      });
+                  } else if (systolic >= 120 || diastolic >= 80) {
+                      insights.push({
+                          text: `💡 Stage 1 Elevation: Blood pressure is slightly elevated (${localBp} mmHg).`,
+                          action: "Advise limit salt intake, chart BP twice daily for 1 week.",
+                          type: 'yellow'
+                      });
+                  } else {
+                      insights.push({
+                          text: `✅ Cardiovascular: Maternal pulse and blood pressure are within normal physiological ranges.`,
+                          type: 'green'
+                      });
+                  }
+              }
+          }
+      } else {
+          insights.push({
+              text: `💡 Vitals: Add blood pressure readings to evaluate cardiovascular status.`,
+              type: 'info'
+          });
+      }
+
+      if (localPulse) {
+          const pulseVal = parseInt(localPulse, 10);
+          if (!isNaN(pulseVal)) {
+              if (pulseVal > 100) {
+                  insights.push({
+                      text: `⚠️ Tachycardia: Elevated maternal pulse (${pulseVal} bpm). Rule out anxiety, dehydration, or fever.`,
+                      action: "Advise ECG, hydration monitoring, and repeat pulse check.",
+                      type: 'yellow'
+                  });
+              } else if (pulseVal < 60) {
+                  insights.push({
+                      text: `💡 Bradycardia: Low maternal pulse (${pulseVal} bpm) noted.`,
+                      type: 'info'
+                  });
+              }
+          }
+      }
+
+      if (localSpo2) {
+          const spo2Val = parseInt(localSpo2, 10);
+          if (!isNaN(spo2Val) && spo2Val < 95) {
+              insights.push({
+                  text: `🚨 Oxygen Saturation: Low maternal SpO2 level detected (${spo2Val}%). Evaluate respiratory status.`,
+                  action: "Advise oxygen supplementation, urgent chest auscultation.",
+                  type: 'red'
+              });
+          }
+      }
+
+      const genNotesLower = (localGenNotes || '').toLowerCase();
+      if (genNotesLower.includes('pallor') || genNotesLower.includes('pale') || genNotesLower.includes('anemia')) {
+          insights.push({
+              text: `🩸 Anemia Risk: Pallor detected on general examination. Recommend checking Hemoglobin levels / CBC.`,
+              action: "Advise CBC & Serum Ferritin levels to rule out iron deficiency.",
+              type: 'orange'
+          });
+      }
+
+      if (localPog) {
+          const match = localPog.match(/\d+/);
+          if (match) {
+              const weeks = parseInt(match[0], 10);
+              if (!isNaN(weeks)) {
+                  const examLower = (localPhysExam || '').toLowerCase();
+                  const discrepancy = checkSizeDatesDiscrepancy(weeks, examLower);
+                  if (discrepancy) {
+                      if (discrepancy.type === 'lag') {
+                          insights.push({
+                              text: `⚠️ Size-Dates Discrepancy: Gestational age is ${weeks}w, but uterine size/SFH notes indicate ~${discrepancy.examSize}w size (lag). Assess fetal growth.`,
+                              action: "Advise Obstetric USG with Color Doppler to rule out IUGR.",
+                              type: 'orange'
+                          });
+                      } else if (discrepancy.type === 'lead') {
+                          insights.push({
+                              text: `⚠️ Size-Dates Discrepancy: Gestational age is ${weeks}w, but uterine size/SFH notes indicate ~${discrepancy.examSize}w size (lead). Rule out GDM/multiple gestation.`,
+                              action: "Advise OGTT (Oral Glucose Tolerance Test) & USG anomaly scan.",
+                              type: 'orange'
+                          });
+                      }
+                  } else {
+                      insights.push({
+                          text: `✅ Fetal Development: Symphysio-fundal size is consistent with calculated gestational age.`,
+                          type: 'green'
+                      });
+                  }
+              }
+          }
+      }
+
+      // Gynecological & Infertility Insights
+      const isInf = isInfertilityCase();
+      const combinedComplaints = (localComplaints || '').toLowerCase();
+      const examLower = (localPhysExam || '').toLowerCase();
+      const bmiVal = (localWeight && localHeight) ? (parseFloat(localWeight) / Math.pow(parseFloat(localHeight)/100, 2)) : 0;
+      const ageVal = selectedPatient ? parseInt(selectedPatient.age, 10) : 0;
+
+      const isPcosSuspected = (
+          combinedComplaints.includes('irregular') || 
+          combinedComplaints.includes('oligomenorrhea') || 
+          examLower.includes('polycystic') || 
+          examLower.includes('pco') ||
+          (bmiVal > 25 && combinedComplaints.includes('conceive'))
+      );
+      if (isPcosSuspected) {
+          insights.push({
+              text: "⚠️ PCOS Risk: Irregular cycles, elevated BMI, or polycystic ovaries noted.",
+              action: "Advise Fasting Insulin, OGTT, LH/FSH ratio, and lipid profile. Counsel on lifestyle modifications.",
+              type: 'orange'
+          });
+      }
+
+      const notesLower = (localGenNotes || '').toLowerCase() + ' ' + examLower;
+      const isDorSuspected = (
+          (ageVal > 35 && (isInf || combinedComplaints.includes('conceive'))) ||
+          notesLower.includes('low amh') ||
+          notesLower.includes('low afc')
+      );
+      if (isDorSuspected) {
+          insights.push({
+              text: `🚨 Diminished Ovarian Reserve (DOR) Risk: Advanced age (${ageVal} years) or low AMH/AFC noted.`,
+              action: "Discuss early referral for assisted reproductive technology (IVF/ICSI).",
+              type: 'red'
+          });
+      }
+
+      const tshMatch = notesLower.match(/tsh\s*[:=]?\s*(\d+(\.\d+)?)/);
+      if (tshMatch && (isInf || combinedComplaints.includes('conceive'))) {
+          const tshVal = parseFloat(tshMatch[1]);
+          if (!isNaN(tshVal) && tshVal > 2.5) {
+              insights.push({
+                  text: `⚠️ Endocrine Flag: TSH level is elevated (${tshVal} mIU/L). Optimal target for infertility is < 2.5 mIU/L.`,
+                  action: "Advise Levothyroxine 25 mcg OD; repeat TSH profile in 4-6 weeks.",
+                  type: 'orange'
+              });
+          }
+      }
+
+      if (examLower.includes('bulky') || examLower.includes('fibroid') || examLower.includes('adenomyosis') || examLower.includes('thin et')) {
+          insights.push({
+              text: "⚠️ Pelvic Pathology: Uterine fibroid, adenomyosis, or thin endometrium noted on scan/exam.",
+              action: "Advise 3D USG / saline infusion sonography (SIS) or diagnostic hysteroscopy to evaluate cavity.",
+              type: 'orange'
+          });
+      }
+
+      if (insights.length === 0) {
+          insights.push({
+              text: "💡 Vitals and examination entries are normal. Enter more clinical details to compute targeted insights.",
+              type: 'info'
+          });
+      }
+
+      return insights;
+  };
 
   const getDefaultFieldsForType = (type: string) => {
     const isObgyn = ['obgyn', 'obstetric', 'gynecology'].includes(type);
@@ -764,46 +1601,86 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   };
 
   useEffect(() => {
-    if (!localPog) {
-      setLookAheadSuggestions([]);
-      return;
-    }
-    const match = localPog.match(/\d+/);
-    if (!match) {
-      setLookAheadSuggestions([]);
-      return;
-    }
-    const weeks = parseInt(match[0], 10);
-    if (isNaN(weeks)) {
+    if (!selectedPatient) {
       setLookAheadSuggestions([]);
       return;
     }
 
     const suggestions: { label: string; text: string; category: 'lab' | 'radiology' | 'vaccine' }[] = [];
 
-    if (weeks >= 6 && weeks <= 12) {
-        suggestions.push({ label: "🔬 Initial ANC Labs (CBC, Ur, Gr, TSH)", text: "Initial ANC Labs (CBC, Urine R/E, Blood Grouping, TSH)", category: 'lab' });
-        suggestions.push({ label: "🔍 NT/NB Scan (11w-13w)", text: "Ultrasonography (USG): NT/NB Scan", category: 'radiology' });
+    // 1. Obstetric milestones (if localPog is available)
+    if (localPog) {
+      const match = localPog.match(/\d+/);
+      if (match) {
+        const weeks = parseInt(match[0], 10);
+        if (!isNaN(weeks)) {
+          let followUpWeeks = 0;
+          if (localFollowUpDate) {
+              const today = new Date();
+              const fDate = new Date(localFollowUpDate);
+              const timeDiff = fDate.getTime() - today.getTime();
+              if (timeDiff > 0) {
+                  followUpWeeks = Math.round(timeDiff / (1000 * 60 * 60 * 24 * 7));
+              }
+          }
+
+          const windowStart = weeks;
+          const windowEnd = weeks + (followUpWeeks || 4);
+
+          // Milestone checks falling inside window projection
+          if (windowStart <= 12) {
+              suggestions.push({ label: "🔬 Initial ANC Labs (CBC, Ur, Gr, TSH)", text: "Initial ANC Labs (CBC, Urine R/E, Blood Grouping, TSH)", category: 'lab' });
+          }
+          if (windowStart <= 13 && windowEnd >= 11) {
+              suggestions.push({ label: "🔍 NT/NB Scan (11w-13w)", text: "Ultrasonography (USG): NT/NB Scan", category: 'radiology' });
+          }
+          if (windowStart <= 22 && windowEnd >= 18) {
+              suggestions.push({ label: "🔍 Anomaly Scan (18w-22w)", text: "Ultrasonography (USG): Target Anomaly Scan", category: 'radiology' });
+          }
+          if (windowStart <= 28 && windowEnd >= 24) {
+              suggestions.push({ label: "🔬 Oral Glucose Test (OGTT at 24w)", text: "Oral Glucose Tolerance Test (OGTT)", category: 'lab' });
+          }
+          if (windowStart <= 24 && windowEnd >= 20) {
+              suggestions.push({ label: "💉 TT/Td Vaccine 1st Dose", text: "Inj Td (Tetanus & adult Diphtheria) vaccine (1st Dose)", category: 'vaccine' });
+          }
+          if (windowStart <= 32 && windowEnd >= 28) {
+              suggestions.push({ label: "🔍 Growth Scan (28w-32w)", text: "Ultrasonography (USG): Obstetric Growth Scan with Doppler", category: 'radiology' });
+              suggestions.push({ label: "💉 TDAP Vaccine (28w-32w)", text: "Inj TDAP (Tetanus, Diphtheria, Pertussis) vaccine", category: 'vaccine' });
+              suggestions.push({ label: "🔬 Repeat CBC & Urine R/E", text: "Complete Blood Count (CBC), Urine R/E", category: 'lab' });
+          }
+          if (windowStart <= 37 && windowEnd >= 35) {
+              suggestions.push({ label: "🔬 GBS Screening (35w-37w)", text: "Vaginal/Rectal swab for Group B Streptococcus (GBS) screening", category: 'lab' });
+          }
+          if (windowStart <= 38 && windowEnd >= 32) {
+              suggestions.push({ label: "🔍 Obstetric Color Doppler Scan", text: "Ultrasonography (USG): Obstetric Color Doppler", category: 'radiology' });
+          }
+
+          // Append history, vitals, size-dates, and Rh negative risk suggestions
+          const riskSuggestions = getObstetricRiskSuggestions(weeks);
+          suggestions.push(...riskSuggestions);
+        }
+      }
     }
-    if (weeks >= 13 && weeks <= 20) {
-        suggestions.push({ label: "🔍 Anomaly Scan (18w-22w)", text: "Ultrasonography (USG): Target Anomaly Scan", category: 'radiology' });
-    }
-    if (weeks >= 20 && weeks <= 26) {
-        suggestions.push({ label: "🔬 Oral Glucose Test (OGTT at 24w)", text: "Oral Glucose Tolerance Test (OGTT)", category: 'lab' });
-        suggestions.push({ label: "💉 TT/Td Vaccine (1st/2nd dose)", text: "Inj Td (Tetanus & adult Diphtheria) vaccine", category: 'vaccine' });
-    }
-    if (weeks >= 26 && weeks <= 32) {
-        suggestions.push({ label: "🔍 Growth Scan (28w-32w)", text: "Ultrasonography (USG): Obstetric Growth Scan with Doppler", category: 'radiology' });
-        suggestions.push({ label: "💉 TDAP Vaccine (28w-32w)", text: "Inj TDAP (Tetanus, Diphtheria, Pertussis) vaccine", category: 'vaccine' });
-        suggestions.push({ label: "🔬 Repeat CBC & Urine R/E", text: "Complete Blood Count (CBC), Urine R/E", category: 'lab' });
-    }
-    if (weeks >= 32 && weeks <= 38) {
-        suggestions.push({ label: "🔬 GBS Screening (35w-37w)", text: "Vaginal/Rectal swab for Group B Streptococcus (GBS) screening", category: 'lab' });
-        suggestions.push({ label: "🔍 Obstetric Color Doppler", text: "Ultrasonography (USG): Obstetric Color Doppler", category: 'radiology' });
+
+    // 2. Gynecological & Infertility milestones
+    const isGyn = selectedPatient.type === 'gynecology' || selectedPatient.type === 'infertility' || isGynecologyCase();
+    if (isGyn) {
+        const gynSuggestions = getGynaeRiskSuggestions();
+        suggestions.push(...gynSuggestions);
     }
 
     setLookAheadSuggestions(suggestions);
-  }, [localPog]);
+  }, [localPog, localLmp, localComplaints, localFollowUpDate, selectedPatient, localVisitOH, localGenNotes, localPhysExam]);
+
+  useEffect(() => {
+    if (!selectedPatient) {
+      setSuggestedDrugs([]);
+      return;
+    }
+    const feature = getVisitFeatureVector(selectedPatient.type, localPog, localBp);
+    const suggestions = getPrescribingSuggestions(doctorName, feature);
+    setSuggestedDrugs(suggestions);
+  }, [selectedPatient, localPog, localBp, doctorName]);
 
   const handleDrugClick = (drugName: string) => {
       const stock = getStockLevel(drugName);
@@ -880,40 +1757,49 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
     const updatedPatients = patients.map(p => p.id === selectedPatient.id ? { ...p, obstetricHistory: localVisitOH, pregnancyInfo: pregInfo } : p);
     onUpdatePatients(updatedPatients);
 
-    const reversedVisits = [...visits].reverse();
-    const activeVisit = reversedVisits.find(v => v.patientId === selectedPatient.id && !v.isApproved)
-                      || reversedVisits.find(v => v.patientId === selectedPatient.id && v.isApproved);
-    
-    if (activeVisit) {
-      const updatedVisits = visits.map(v => v.id === activeVisit.id ? { 
-        ...v, 
-        complaints: localComplaints,
-        visitObstetricHistory: localVisitOH,
-        menstrualHistory: localMH,
-        visitLmp: localLmp,
-        visitEdd: localEdd,
-        visitPog: localPog,
-        vitals: { ...v.vitals, pulse: localPulse, bp: localBp, weight: localWeight, spo2: localSpo2, height: localHeight } as Vitals,
-        generalExamination: localGenNotes,
-        examinationDetails: localPhysExam, 
-        prescription: localRx,
-        remarks: localRemarks,
-        followUpDate: localFollowUpDate,
-        episodeId: localEpisodeId,
-        episodeName: localEpisodeName,
-        caseStatus: localCaseStatus,
-        customFields: localCustomFields
-      } : v);
-      onUpdateVisits(updatedVisits);
-    }
+    // Save Prescribing habits
+    const feature = getVisitFeatureVector(selectedPatient.type, localPog, localBp);
+    const enteredDrugs = extractDrugsFromRxText(localRx);
+    savePrescribingHabits(doctorName, feature, enteredDrugs);
+
+    onUpdateVisits(prevVisits => {
+      const reversedVisits = [...prevVisits].reverse();
+      const activeVisit = reversedVisits.find(v => v.patientId === selectedPatient.id && !v.isApproved)
+                        || reversedVisits.find(v => v.patientId === selectedPatient.id && v.isApproved);
+      
+      if (activeVisit) {
+        return prevVisits.map(v => v.id === activeVisit.id ? { 
+          ...v, 
+          isApproved: true,
+          callingStatus: 'waiting',
+          complaints: localComplaints,
+          visitObstetricHistory: localVisitOH,
+          menstrualHistory: localMH,
+          visitLmp: localLmp,
+          visitEdd: localEdd,
+          visitPog: localPog,
+          vitals: { ...v.vitals, pulse: localPulse, bp: localBp, weight: localWeight, spo2: localSpo2, height: localHeight } as Vitals,
+          generalExamination: localGenNotes,
+          examinationDetails: localPhysExam, 
+          prescription: localRx,
+          remarks: localRemarks,
+          followUpDate: localFollowUpDate,
+          episodeId: localEpisodeId,
+          episodeName: localEpisodeName,
+          caseStatus: localCaseStatus,
+          customFields: localCustomFields
+        } : v);
+      }
+      return prevVisits;
+    });
+
     if(!silent) alert("Case record saved.");
   };
 
   const handleApprove = (visitId: string) => {
     if (!selectedPatient) return;
     handleSaveCaseData(true);
-    const updatedVisits = visits.map(v => v.id === visitId ? { ...v, isApproved: true, callingStatus: 'waiting' } as VisitRecord : v);
-    onUpdateVisits(updatedVisits);
+    onUpdateVisits(prevVisits => prevVisits.map(v => v.id === visitId ? { ...v, isApproved: true, callingStatus: 'waiting' } as VisitRecord : v));
     setShowOrderModal(false);
   };
 
@@ -1013,10 +1899,9 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
           billNumber: billNo, items: billItems, subTotal, discount: billDiscount, grandTotal,
           collectedBy: doctorName, paymentMethod: method, date: new Date().toISOString()
       };
-      const updated = visits.map(v => v.id === currentBillVisit.id ? { 
+      onUpdateVisits(prevVisits => prevVisits.map(v => v.id === currentBillVisit.id ? { 
           ...v, paymentStatus: 'paid', paymentMethod: method, collectedBy: doctorName, finalBill: finalBill
-      } as VisitRecord : v);
-      onUpdateVisits(updated);
+      } as VisitRecord : v));
       setShowBillingModal(false);
       setCurrentBillVisit(null);
       alert(`Payment of ₹${grandTotal} Collected! Bill #${billNo}`);
@@ -1151,6 +2036,121 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
     printWindow.document.write(`<html><head><title>Prescription - ${selectedPatient.name}</title><script src="https://cdn.tailwindcss.com"></script><style>@page { size: A4; margin: 0; } body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: white; color: black; margin: 0; box-sizing: border-box; } .print-container { min-height: 297mm; position: relative; box-sizing: border-box; padding-top: ${computedPaddingTop}; padding-bottom: ${layout.marginBottom}mm; padding-left: ${layout.marginLeft}mm; padding-right: ${layout.marginRight}mm; } .line-item { margin-bottom: 8px; font-size: 14px; } .paragraph-item { margin-bottom: 16px; font-size: 14px; } </style></head><body><div class="print-container">${hasHeaderImage ? `<div style="position: absolute; top: 0; left: 0; right: 0; width: 100%; height: ${headerHeightVal}mm; overflow: hidden;"><img src="${printSettings.headerImage}" style="width: 100%; height: 100%; object-fit: fill;" /></div>` : ''}<div class="max-w-[190mm] mx-auto">${printSettings?.headerText ? `<div class="mb-6 pb-4 border-b border-slate-100 text-xs font-sans text-slate-700 leading-relaxed">${printSettings.headerText}</div>` : ''}${contentHtml}</div>${printSettings?.footerImage ? `<div style="position: absolute; bottom: 0; left: 0; right: 0; width: 100%; height: ${layout.footerHeight || 20}mm; overflow: hidden;"><img src="${printSettings.footerImage}" style="width: 100%; height: 100%; object-fit: fill;" /></div>` : `<div style="position: absolute; bottom: ${layout.marginBottom}mm; left: ${layout.marginLeft}mm; right: ${layout.marginRight}mm; display: flex; justify-content: space-between; align-items: flex-end; width: calc(100% - ${layout.marginLeft + layout.marginRight}mm);"><div style="font-size: 10px; color: #64748b; max-width: 60%; text-align: left; line-height: 1.4; white-space: pre-wrap;">${printSettings?.footerText || ''}</div><div style="text-align: right;"><div class="h-12 w-48 border-b border-slate-300 mb-2 ml-auto"></div><p class="font-black uppercase text-xs" style="margin: 0; color: #1e293b;">${doctorName}</p><p class="text-[10px] font-bold text-slate-500 uppercase tracking-tight" style="margin: 0;">${selectedDoctor.qualifications}</p><p class="text-[10px] font-bold text-slate-500 uppercase tracking-tight" style="margin: 0;">${selectedDoctor.specialty}</p></div></div>`}</div></body><script>window.onload = () => { window.print(); window.close(); }</script></html>`);
     printWindow.document.close();
+  };
+
+  const handlePrintMtpForms = (record: import('../types').RegistryRecord) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    
+    const formCText = record.data['Form C Text'] 
+      ? record.data['Form C Text'].replace(/\n/g, '<br/>')
+      : `I, <strong>${record.data['Name']}</strong>, daughter/wife of <strong>${record.data['Relation (W/D of)']}</strong>, aged <strong>${record.data['Age']}</strong> years, residing at <strong>${record.data['Address']}</strong>, hereby give my consent for the medical termination of my pregnancy under the Medical Termination of Pregnancy Act, 1971.<br/><br/>Method of Termination: <strong>${record.data['Method']}</strong>`;
+
+    const formIText = record.data['Form I Text']
+      ? record.data['Form I Text'].replace(/\n/g, '<br/>')
+      : `We/I, Registered Medical Practitioner(s), state that the termination of pregnancy for Patient Serial Number <strong>${record.data['Serial Number']}</strong> is necessitated under Section 3(2)(b)(i) of the Act as the continuation of the pregnancy would involve a risk to the physical or mental health of the pregnant woman.<br/><br/><strong>Reason for MTP:</strong> ${record.data['Indication']}`;
+
+    const consentText = record.data['MTP Consent Text']
+      ? record.data['MTP Consent Text'].replace(/\n/g, '<br/>')
+      : `I, <strong>${record.data['Name']}</strong>, authorize <strong>${record.data['RMP Name']}</strong> to perform the MTP procedure. I have been informed of the clinical risks, potential complications, and alternative treatments. I agree to accept post-abortion contraceptive advice and have accepted <strong>${record.data['Contraceptive']}</strong>.`;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>MTP Forms Set - ${record.data['Serial Number'] || 'Draft'}</title>
+          <script src="/tailwind.js"></script>
+          <style>
+            @page { size: A4; margin: 20mm; }
+            body { font-family: 'Inter', system-ui, -apple-system, sans-serif; color: black; background: white; }
+            .page-break { page-break-after: always; }
+          </style>
+        </head>
+        <body class="p-8 space-y-12">
+          <!-- Form C -->
+          <div class="page-break space-y-6">
+            <h1 class="text-center font-bold text-lg uppercase underline mb-8">Form C (Consent Form)</h1>
+            <p class="leading-relaxed text-sm">${formCText}</p>
+            <div class="pt-24 flex justify-between text-sm">
+              <span>Date: ${record.data['Admission Date']}</span>
+              <div class="border-t border-black pt-1 w-48 text-center font-bold">Signature / Thumb Impression</div>
+            </div>
+          </div>
+
+          <!-- Form I -->
+          <div class="page-break space-y-6">
+            <h1 class="text-center font-bold text-lg uppercase underline mb-4">Form I (RMP Opinion Form)</h1>
+            <div class="text-right text-sm mb-8"><strong>Serial Number:</strong> ${record.data['Serial Number']}</div>
+            <p class="leading-relaxed text-sm">${formIText}</p>
+            <div class="pt-24 flex justify-between text-sm">
+              <div>
+                <p>1. ${record.data['RMP Name']}</p>
+                <div class="border-t border-black pt-1 w-48 text-center mt-12 font-bold">Signature of RMP</div>
+              </div>
+              ${record.data['Remarks']?.includes('2nd RMP') ? `
+              <div>
+                <p>2. ${record.data['Remarks'].split('2nd RMP: ')[1]?.split(' (')[0] || 'Second RMP'}</p>
+                <div class="border-t border-black pt-1 w-48 text-center mt-12 font-bold">Signature of RMP</div>
+              </div>` : ''}
+            </div>
+          </div>
+
+          <!-- Procedural Consent -->
+          <div class="space-y-6">
+            <h1 class="text-center font-bold text-lg uppercase underline mb-8">MTP Informed Consent Form</h1>
+            <p class="leading-relaxed text-sm">${consentText}</p>
+            <div class="pt-24 flex justify-between text-sm">
+              <span>Date: ${record.data['Admission Date']}</span>
+              <div class="border-t border-black pt-1 w-48 text-center font-bold">Signature / Thumb Impression</div>
+            </div>
+          </div>
+
+          <script>
+            window.onload = () => { window.print(); window.close(); }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handleConfirmReprint = () => {
+    if (!reprintActiveRecordId) return;
+    const matches = (consultants || []).filter(c => c.pin === reprintPin);
+    if (matches.length === 0) {
+      alert("❌ Invalid Doctor's PIN! Reprint request aborted.");
+      return;
+    }
+    const doctorObj = matches[0];
+    if (!reprintReason.trim()) {
+      alert("❌ Please enter a reason for reprinting.");
+      return;
+    }
+    const matchedRecord = (registryRecords || []).find(r => r.id === reprintActiveRecordId);
+    if (!matchedRecord) return;
+
+    const timeStr = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = new Date().toLocaleDateString('en-IN');
+    const reprintLogEntry = `[Reprinted by ${doctorObj.name} at ${timeStr} on ${dateStr} - Reason: ${reprintReason}]`;
+    const oldRemarks = matchedRecord.data['Remarks'] || '';
+    const newRemarks = oldRemarks ? `${oldRemarks}; ${reprintLogEntry}` : reprintLogEntry;
+
+    const updated = (registryRecords || []).map(r => {
+      if (r.id === reprintActiveRecordId) {
+        return { ...r, data: { ...r.data, 'Remarks': newRemarks } };
+      }
+      return r;
+    });
+
+    if (onUpdateRecords) {
+      onUpdateRecords(updated);
+    }
+    const updatedRecord = { ...matchedRecord, data: { ...matchedRecord.data, 'Remarks': newRemarks } };
+    handlePrintMtpForms(updatedRecord);
+
+    setShowReprintModal(false);
+    setReprintPin('');
+    setReprintReason('');
+    setReprintActiveRecordId(null);
   };
 
   const handlePrintUsgReferral = () => {
@@ -1447,6 +2447,73 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
     return list;
   }, [selectedPatient, visits]);
 
+  const renderRecentInvestigations = () => {
+      if (!selectedPatient) return null;
+      
+      const currentOrders = labOrders.filter(
+          o => o.patientId === selectedPatient.id && 
+               o.status === 'completed' &&
+               new Date(o.timestamp).toISOString().slice(0, 10) === queueDate
+      );
+      
+      const hasPastOrders = labOrders.some(
+          o => o.patientId === selectedPatient.id && 
+               o.status === 'completed' &&
+               new Date(o.timestamp).toISOString().slice(0, 10) !== queueDate
+      );
+
+      return (
+          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 text-left">
+              <div className="flex justify-between items-center mb-1">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Recent Investigations</h3>
+                  {hasPastOrders && (
+                      <button
+                          onClick={() => setShowPastInvestigationsModal(true)}
+                          className="text-[9px] text-blue-600 hover:underline font-black uppercase tracking-wider"
+                      >
+                          📁 Past Reports
+                      </button>
+                  )}
+              </div>
+              <div className="space-y-2">
+                  {currentOrders.map(ord => {
+                      const dateStr = new Date(ord.timestamp).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                      });
+                      const isExternal = (ord.reportData as any)?.isExternal;
+                      const title = (ord.reportData as any)?.title || (ord.ultrasound ? 'USG Report' : 'Lab Report');
+                      
+                      return (
+                          <div key={ord.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                              <div>
+                                  <p className="text-xs font-bold text-slate-800">{title}</p>
+                                  <p className="text-[10px] text-slate-400 font-bold">{dateStr}</p>
+                              </div>
+                              <button
+                                  onClick={() => {
+                                      if (isExternal) {
+                                          alert(`${title} : ${(ord.reportData as any).externalLink}`);
+                                      } else {
+                                          setShowReportPreview(ord);
+                                      }
+                                  }}
+                                  className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors border border-blue-100"
+                              >
+                                  👁️ View
+                              </button>
+                          </div>
+                      );
+                  })}
+                  {currentOrders.length === 0 && (
+                      <p className="text-xs text-slate-400 italic text-center py-4">No investigations completed today.</p>
+                  )}
+              </div>
+          </div>
+      );
+  };
+
   const renderEMRField = (fieldId: string) => {
     const config = fieldsConfig.find(f => f.id === fieldId);
     if (!config || !config.visible) return null;
@@ -1466,27 +2533,50 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
               <div className="mt-4 pt-3 border-t border-slate-200 space-y-3">
                 <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest block">Select Quick Template:</span>
                 <div className="space-y-2.5">
-                  {COMPLAINT_GROUPS.map((group, idx) => (
-                    <div key={idx} className="space-y-1">
-                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">{group.category}</span>
-                      <div className="flex flex-wrap gap-1">
-                        {group.items.map((item, itemIdx) => (
-                          <button
-                            key={itemIdx}
-                            onClick={() => {
-                              const current = localComplaints.trim();
-                              const appendStr = item.text;
-                              if (current.includes(item.text)) return;
-                              setLocalComplaints(prev => prev ? `${prev}\n${appendStr}` : appendStr);
-                            }}
-                            className="bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg px-2.5 py-1 text-[9px] font-bold text-slate-600 hover:text-blue-700 transition"
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                  {COMPLAINT_GROUPS.filter(group => {
+                      const isANC = selectedPatient?.type === 'obstetric';
+                      const isGyn = selectedPatient?.type === 'gynecology' || selectedPatient?.type === 'infertility' || isGynecologyCase();
+                      
+                      if (isANC) {
+                          return group.category !== "Menstrual & Gynae";
+                      }
+                      if (isGyn) {
+                          return group.category !== "Routine ANC" && group.category !== "OB Emergencies";
+                      }
+                      return true;
+                  }).map((group, idx) => {
+                      const isANC = selectedPatient?.type === 'obstetric';
+                      const filteredItems = group.items.filter(item => {
+                          if (isANC && item.label === "Infertility Workup") return false;
+                          return true;
+                      });
+                      if (filteredItems.length === 0) return null;
+                      return (
+                        <div key={idx} className="space-y-1">
+                          <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider block">{group.category}</span>
+                          <div className="flex flex-wrap gap-1">
+                            {filteredItems.map((item, itemIdx) => (
+                              <button
+                                key={itemIdx}
+                                onClick={() => {
+                                  setTemplatePromptConfig({
+                                      isOpen: true,
+                                      label: item.label,
+                                      rawText: item.text,
+                                      category: group.category
+                                  });
+                                  setPromptLmp(localLmp || '');
+                                  setPromptDuration('');
+                                }}
+                                className="bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg px-2.5 py-1 text-[9px] font-bold text-slate-600 hover:text-blue-700 transition"
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                  })}
                 </div>
               </div>
             )}
@@ -1504,29 +2594,61 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
           </div>
         );
       case 'menstrualHistory':
+        const isGyn = selectedPatient.type === 'gynecology' || selectedPatient.type === 'infertility' || isGynecologyCase();
+        
+        const getDayOfMensesVal = () => {
+            if (!localLmp) return '--';
+            const today = new Date();
+            const lmpDate = new Date(localLmp);
+            const timeDiff = today.getTime() - lmpDate.getTime();
+            if (timeDiff >= 0) {
+                return `${Math.floor(timeDiff / (1000 * 60 * 60 * 24)) + 1} Days`;
+            }
+            return '--';
+        };
+
         return (
           <div key="menstrualHistory" className="bg-pink-50/50 p-6 rounded-2xl border border-pink-100 relative space-y-4 text-left shadow-sm hover:shadow-md transition-shadow">
             <h3 className="text-[10px] font-black text-pink-600 uppercase tracking-widest border-b border-pink-200 pb-2 mb-3">{config.label}</h3>
-            <div className="grid grid-cols-3 gap-3">
-                <div>
-                    <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">LMP Date</label>
-                    {selectedPatient.pregnancyInfo?.lmp ? (
-                        <div className="w-full bg-pink-100/50 border border-pink-205 rounded-lg px-2 py-1.5 text-xs font-bold text-pink-850">
-                            {selectedPatient.pregnancyInfo.lmp}
-                        </div>
-                    ) : (
-                        <input type="date" value={localLmp} onChange={e => { setLocalLmp(e.target.value); calculateEdd(e.target.value); }} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" />
-                    )}
-                </div>
-                <div>
-                    <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">EDD</label>
-                    <input type="date" value={localEdd} onChange={e => setLocalEdd(e.target.value)} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" />
-                </div>
-                <div>
-                    <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">POG</label>
-                    <input value={localPog} onChange={e => setLocalPog(e.target.value)} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" placeholder="e.g. 12w 4d" />
-                </div>
-            </div>
+            
+            {isGyn ? (
+              /* Gynecological Case: Show LMP and Day of Menses */
+              <div className="grid grid-cols-2 gap-3">
+                  <div>
+                      <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">LMP Date</label>
+                      <input type="date" value={localLmp} onChange={e => setLocalLmp(e.target.value)} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" />
+                  </div>
+                  <div>
+                      <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">Day of Menses</label>
+                      <div className="w-full bg-pink-100/30 border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-black text-pink-700 select-none">
+                          {getDayOfMensesVal()}
+                      </div>
+                  </div>
+              </div>
+            ) : (
+              /* Obstetric (ANC) Case: Show LMP, EDD, and POG */
+              <div className="grid grid-cols-3 gap-3">
+                  <div>
+                      <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">LMP Date</label>
+                      {selectedPatient.pregnancyInfo?.lmp ? (
+                          <div className="w-full bg-pink-100/50 border border-pink-205 rounded-lg px-2 py-1.5 text-xs font-bold text-pink-850">
+                              {selectedPatient.pregnancyInfo.lmp}
+                          </div>
+                      ) : (
+                          <input type="date" value={localLmp} onChange={e => { setLocalLmp(e.target.value); calculateEdd(e.target.value); }} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" />
+                      )}
+                  </div>
+                  <div>
+                      <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">EDD</label>
+                      <input type="date" value={localEdd} onChange={e => setLocalEdd(e.target.value)} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" />
+                  </div>
+                  <div>
+                      <label className="text-[8px] font-black text-pink-400 uppercase block mb-1">POG</label>
+                      <input value={localPog} onChange={e => setLocalPog(e.target.value)} className="w-full bg-white border border-pink-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-slate-800" placeholder="e.g. 12w 4d" />
+                  </div>
+              </div>
+            )}
+
             <textarea value={localMH} onChange={e => setLocalMH(e.target.value)} className="w-full h-16 text-sm bg-white border border-pink-200 rounded-xl px-4 py-2 font-bold focus:ring-4 focus:ring-pink-100 outline-none transition-all resize-none text-slate-800" placeholder="Cycle regularity, flow details..."/>
             <div className="absolute top-6 right-6 flex gap-1">
               <button onClick={() => setTemplateConfig({ isOpen: true, type: 'mh' })} className="bg-white hover:bg-slate-100 p-1 rounded-lg border border-pink-100 text-sm shadow-sm transition-all" title="Load Template">📋</button>
@@ -1601,6 +2723,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
           </div>
         );
       case 'prescription':
+        const safetyAlerts = getSafetyAlerts(localRx, selectedPatient);
         return (
           <div key="prescription" className="bg-green-50/10 p-6 rounded-2xl border-2 border-green-150 relative min-h-[200px] flex flex-col text-left shadow-sm hover:shadow-md transition-shadow">
             <h3 className="text-[10px] font-black text-green-600 uppercase tracking-widest border-b border-green-100 pb-2 mb-3 shrink-0">{config.label}</h3>
@@ -1609,6 +2732,48 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                 <button onClick={() => handleTranslateRx('Hindi')} disabled={isTranslating} className="text-[9px] bg-white border border-green-200 px-2 py-1 rounded-lg uppercase font-bold text-green-700 hover:bg-green-50 transition-all">{isTranslating ? '...' : 'अ'}</button>
             </div>
             <textarea value={localRx} onChange={e => setLocalRx(e.target.value)} className="flex-grow w-full text-lg bg-white border border-green-200 rounded-xl px-4 py-2 font-black focus:ring-4 focus:ring-green-50 outline-none transition-all resize-none text-slate-800" placeholder="Medications..."/>
+            
+            {/* Smart Prescribing Habit Suggestions */}
+            {suggestedDrugs.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5 items-center shrink-0">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mr-1">💡 Smart Suggestions:</span>
+                {suggestedDrugs.map((drug, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      const currentVal = localRx.trim();
+                      if (!currentVal.toLowerCase().includes(drug.toLowerCase())) {
+                        setLocalRx(prev => `${prev}${prev ? '\n' : ''}${drug} OD`);
+                      }
+                    }}
+                    className="bg-green-50 text-green-700 hover:bg-green-100 border border-green-200/55 px-2 py-0.5 rounded-full text-[9px] font-bold transition-all shadow-sm active:scale-95"
+                  >
+                    {drug}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Clinical Safety Guardrail Alerts */}
+            {safetyAlerts.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1 shrink-0">
+                {safetyAlerts.map((alert, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex items-center space-x-1.5 p-1.5 rounded-lg border text-[9px] font-bold ${
+                      alert.type === 'red' ? 'bg-red-50 text-red-700 border-red-100 animate-pulse' :
+                      alert.type === 'orange' ? 'bg-orange-50 text-orange-700 border-orange-100' :
+                      'bg-amber-50 text-amber-700 border-amber-100'
+                    }`}
+                  >
+                    <span>{alert.icon}</span>
+                    <span className="uppercase tracking-wide">{alert.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="absolute bottom-4 right-6 flex gap-1">
               <button onClick={() => setShowQuickRxModal(true)} className="bg-white p-1 rounded-lg border border-green-100 text-[10px] shadow-sm font-black px-2.5 text-green-600 transition-all hover:bg-green-50">Quick Rx</button>
               <button onClick={() => setTemplateConfig({ isOpen: true, type: 'prescription' })} className="bg-white hover:bg-slate-100 p-1 rounded-lg border border-green-100 text-sm shadow-sm transition-all" title="Load Template">📋</button>
@@ -1742,6 +2907,28 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
            <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[8px] font-black uppercase">ACTIVE</span>
            <span className="text-[9px] font-bold text-slate-400">ID: {selectedPatient?.uhid || selectedPatient?.id}</span>
          </div>
+         <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                  if (isConversationRecording) {
+                      stopConversationDictation();
+                  } else {
+                      startConversationDictation();
+                  }
+              }}
+              disabled={isVoiceProcessing}
+              className={`w-full py-2 px-3 rounded-xl border text-[9px] font-black uppercase tracking-widest shadow-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${isConversationRecording ? 'bg-red-500 border-red-500 text-white animate-pulse' : 'bg-slate-800 border-slate-800 text-white hover:bg-slate-900'} ${isVoiceProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {isConversationRecording ? (
+                <>🔴 Stop Recording Conversation</>
+              ) : isVoiceProcessing ? (
+                <>⏳ Parsing EMR Details...</>
+              ) : (
+                <>🎙️ Record Consultation</>
+              )}
+            </button>
+         </div>
        </div>
 
        <div className="p-4 border-b border-slate-100">
@@ -1844,17 +3031,50 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
              {isAiLoading ? (
                  <li className="animate-pulse">Analyzing case data...</li>
              ) : (
-               <>
-                 <li>Potential risk of anemia based on pallor finding.</li>
-                 <li>Blood pressure is slightly elevated (Stage 1).</li>
-                 <li>POG and LMP are consistent with gestational age.</li>
-               </>
+                <>
+                  {getDynamicAiInsights().map((insight, idx) => (
+                     <li key={idx} className="flex justify-between items-start gap-3 py-1 text-slate-700">
+                        <span>{insight.text}</span>
+                        {insight.action && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const currentVal = localRemarks.trim();
+                              const appendStr = `- ${insight.action}`;
+                              if (!currentVal.includes(insight.action)) {
+                                setLocalRemarks(prev => `${prev}${prev ? '\n' : ''}${appendStr}`);
+                              }
+                            }}
+                            className="shrink-0 bg-white border border-blue-100 hover:bg-blue-50 px-2 py-0.5 rounded text-[8px] font-black text-blue-600 transition flex items-center shadow-sm active:scale-95 whitespace-nowrap"
+                            title={`Click to add recommendation to remarks: "${insight.action}"`}
+                          >
+                            ＋ Remarks
+                          </button>
+                        )}
+                     </li>
+                  ))}
+                </>
              )}
           </ul>
 
-          {selectedPatient?.type === 'obstetric' && lookAheadSuggestions.length > 0 && (
+          {(selectedPatient?.type === 'obstetric' || selectedPatient?.type === 'gynecology' || selectedPatient?.type === 'infertility' || isGynecologyCase()) && lookAheadSuggestions.length > 0 && (
              <div className="mt-3 pt-3 border-t border-blue-100/50">
-               <h4 className="text-[8px] font-black uppercase text-blue-500 tracking-wider mb-2">🤰 Look-Ahead Prompts (Trimester Milestones):</h4>
+               <h4 className="text-[8px] font-black uppercase text-blue-500 tracking-wider mb-2">
+                 🤰/🩺 Look-Ahead Prompts (Milestones)
+                 {(() => {
+                     const isGynCase = selectedPatient?.type === 'gynecology' || selectedPatient?.type === 'infertility' || isGynecologyCase();
+                     if (isGynCase && localLmp) {
+                         const today = new Date();
+                         const lmpDate = new Date(localLmp);
+                         const timeDiff = today.getTime() - lmpDate.getTime();
+                         if (timeDiff >= 0) {
+                             return ` [Menses Day: ${Math.floor(timeDiff / (1000 * 60 * 60 * 24)) + 1}]`;
+                         }
+                     }
+                     return '';
+                 })()}
+                 :
+               </h4>
                <div className="flex flex-col gap-1.5">
                   {lookAheadSuggestions.map((s, idx) => (
                       <button
@@ -1939,10 +3159,11 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         {/* Tabs */}
-        <div className="flex space-x-2 bg-slate-200 p-1 rounded-2xl w-fit">
+        <div class="flex space-x-2 bg-slate-200 p-1 rounded-2xl w-fit">
             <button onClick={() => setActiveTab('stats')} className={`px-8 py-3 rounded-xl font-black transition-all whitespace-nowrap uppercase tracking-widest text-[10px] ${activeTab === 'stats' ? 'bg-white text-purple-600 shadow-xl' : 'text-slate-600 hover:text-slate-800'}`}>My Dashboard</button>
             <button onClick={() => setActiveTab('queue')} className={`px-8 py-3 rounded-xl font-black transition-all whitespace-nowrap uppercase tracking-widest text-[10px] ${activeTab === 'queue' ? 'bg-white text-blue-600 shadow-xl' : 'text-slate-600 hover:text-slate-800'}`}>Queue</button>
             <button onClick={() => setActiveTab('edd')} className={`px-8 py-3 rounded-xl font-black transition-all whitespace-nowrap uppercase tracking-widest text-[10px] ${activeTab === 'edd' ? 'bg-white text-pink-600 shadow-xl' : 'text-slate-600 hover:text-slate-800'}`}>EDD</button>
+            <button onClick={() => setActiveTab('mtp')} className={`px-8 py-3 rounded-xl font-black transition-all whitespace-nowrap uppercase tracking-widest text-[10px] ${activeTab === 'mtp' ? 'bg-white text-amber-600 shadow-xl' : 'text-slate-600 hover:text-slate-800'}`}>MTP Act Compliance</button>
         </div>
 
         {/* Doctor name & Settings Gear */}
@@ -2172,6 +3393,409 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
         </div>
       )}
 
+      {activeTab === 'mtp' && (
+        <div className="space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-md border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h3 className="font-black text-slate-800 uppercase tracking-tight text-base">⚖️ MTP ACT COMPLIANCE ASSISTANT</h3>
+                    <p className="text-xs text-slate-400 font-bold uppercase mt-0.5">Maharashtra State Statutory Audits</p>
+                </div>
+                <div className="flex gap-2">
+                    <select
+                        value={mtpSelectedPatientId}
+                        onChange={(e) => {
+                            setMtpSelectedPatientId(e.target.value);
+                            setMtpMethod('');
+                            setMtpIndication('');
+                            setMtpContraception('None');
+                            setMtpMaritalStatus('Married');
+                            setMtpConsentVerified(false);
+                            setMtpSecondRmpName('');
+                            setMtpSecondRmpReg('');
+                        }}
+                        className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-bold outline-none text-slate-800"
+                    >
+                        <option value="">-- Select Patient for MTP Audit --</option>
+                        {patients.map(p => (
+                            <option key={p.id} value={p.id}>{p.name} ({p.age}y, UHID: {p.uhid || 'N/A'})</option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+
+            {(() => {
+                const mtpPat = patients.find(p => p.id === mtpSelectedPatientId);
+                if (!mtpPat) return <div className="text-center py-20 text-slate-400 font-bold uppercase tracking-widest bg-white rounded-3xl border border-slate-100 shadow-md">Select an active patient to start MTP statutory audit.</div>;
+                
+                let gestWeeks = 0;
+                if (mtpPat.pregnancyInfo?.lmp) {
+                    const lmpDate = new Date(mtpPat.pregnancyInfo.lmp);
+                    const diffTime = Math.abs(Date.now() - lmpDate.getTime());
+                    gestWeeks = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
+                }
+
+                const matchedRecord = (registryRecords || []).find(r => r.registryId === 'mtp_register' && r.data['Name'] === mtpPat.name);
+                const isLocked = !!matchedRecord;
+                const isFullyCompliant = mtpConsentVerified && mtpMethod !== '' && mtpIndication !== '' && (gestWeeks <= 20 || (mtpSecondRmpName.trim() !== '' && mtpSecondRmpReg.trim() !== ''));
+
+                const handleLockMtp = () => {
+                     if (!isFullyCompliant || !onUpdateRecords) return;
+                     const mtpRecords = (registryRecords || []).filter(r => r.registryId === 'mtp_register');
+                     const nextSeq = mtpRecords.length + 1;
+                     const serial = `MTP/${nextSeq}/${new Date().getFullYear()}`;
+
+                     const defaultFormC = `I, ${mtpPat.name}, daughter/wife of ${mtpPat.customFields?.relation || 'Daughter/Wife of ' + mtpPat.name}, aged ${mtpPat.age} years, residing at ${mtpPat.address || 'Not Provided'}, hereby give my consent for the medical termination of my pregnancy under the Medical Termination of Pregnancy Act, 1971.\n\nMethod of Termination: ${mtpMethod === 'medical' ? 'Medical (MTP Pill Kit)' : 'Surgical (MVA/EVA)'}`;
+                     const defaultFormI = `We/I, Registered Medical Practitioner(s), state that the termination of pregnancy for Patient Serial Number ${serial} is necessitated under Section 3(2)(b)(i) of the Act as the continuation of the pregnancy would involve a risk to the physical or mental health of the pregnant woman.\n\nReason for MTP: ${mtpIndication}`;
+                     const defaultConsent = `I, ${mtpPat.name}, authorize ${doctorName} to perform the MTP procedure. I have been informed of the clinical risks, potential complications, and alternative treatments. I agree to accept post-abortion contraceptive advice and have accepted ${mtpContraception}.`;
+
+                     const newRecord = {
+                         id: `mtp_rec_${Date.now()}`,
+                         registryId: 'mtp_register',
+                         timestamp: Date.now(),
+                         data: {
+                             'Serial Number': serial,
+                             'Admission Date': new Date().toISOString().split('T')[0],
+                             'Name': mtpPat.name,
+                             'Relation (W/D of)': mtpPat.customFields?.relation || 'Daughter/Wife of ' + mtpPat.name,
+                             'Age': mtpPat.age,
+                             'Religion': mtpPat.customFields?.religion || 'Hindu',
+                             'Address': mtpPat.address || 'Not Provided',
+                             'Marital Status': mtpMaritalStatus,
+                             'Gest. Weeks': `${gestWeeks} weeks`,
+                             'Indication': mtpIndication,
+                             'Method': mtpMethod === 'medical' ? 'Medical (MTP Pill Kit)' : 'Surgical (MVA/EVA)',
+                             'Date MTP': new Date().toISOString().split('T')[0],
+                             'Date Discharge': new Date().toISOString().split('T')[0],
+                             'Contraceptive': mtpContraception,
+                             'RMP Name': doctorName,
+                             'Remarks': gestWeeks > 20 ? `2nd RMP: ${mtpSecondRmpName} (Reg: ${mtpSecondRmpReg})` : '',
+                             'Form C Text': defaultFormC,
+                             'Form I Text': defaultFormI,
+                             'MTP Consent Text': defaultConsent
+                         }
+                     };
+
+                     onUpdateRecords([newRecord, ...registryRecords]);
+                };
+
+                const handleUpdateMtpText = (field: 'Form C Text' | 'Form I Text' | 'MTP Consent Text', newText: string) => {
+                     if (!activeRec || !onUpdateRecords) return;
+                     const updated = (registryRecords || []).map(r => {
+                         if (r.id === activeRec.id) {
+                             return {
+                                 ...r,
+                                 data: {
+                                     ...r.data,
+                                     [field]: newText
+                                 }
+                             };
+                         }
+                         return r;
+                     });
+                     onUpdateRecords(updated);
+                 };
+
+                 const activeRec = matchedRecord || null;
+
+                return (
+                    <div className="space-y-6 text-left">
+                        <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
+                            <div className="flex justify-between items-start mb-6">
+                                <div>
+                                    <h4 className="text-[10px] font-black text-amber-600 uppercase tracking-widest">MTP Act Compliance Checklist</h4>
+                                    <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight mt-0.5">{mtpPat.name}</h3>
+                                </div>
+                                <span className="px-3 py-1 bg-amber-500/10 text-amber-600 border border-amber-500/20 text-xs font-black uppercase rounded-lg">Gestation: {gestWeeks} Weeks</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/50 flex flex-col gap-4">
+                                    <h4 className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Required Document Uploads</h4>
+                                    
+                                    <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                                        <span>1. USG Report (Confirming Gestation)</span>
+                                        <span className="text-emerald-600 font-bold">✅ Verified (LMP: {mtpPat.pregnancyInfo?.lmp || 'Not Set'})</span>
+                                    </div>
+                                    
+                                    <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                                        <span>2. Form C (Patient Consent) Signed</span>
+                                        {isLocked ? (
+                                            <span className="text-emerald-600 font-bold">✅ Verified</span>
+                                        ) : mtpConsentVerified ? (
+                                            <span className="text-emerald-600 font-bold cursor-pointer" onClick={() => setMtpConsentVerified(false)}>✅ Verified (Click to undo)</span>
+                                        ) : (
+                                            <button onClick={() => setMtpConsentVerified(true)} className="px-3 py-1 bg-amber-500 text-slate-900 font-black text-[9px] uppercase rounded-lg hover:bg-amber-400 transition-colors">Verify Consent</button>
+                                        )}
+                                    </div>
+
+                                    <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                                        <span>3. Marital Status</span>
+                                        {isLocked && activeRec ? (
+                                            <span className="font-bold text-slate-800">{activeRec.data['Marital Status']}</span>
+                                        ) : (
+                                            <select value={mtpMaritalStatus} onChange={(e) => setMtpMaritalStatus(e.target.value)} className="bg-white border rounded px-2 py-1 text-[11px] font-bold text-slate-700">
+                                                <option value="Married">Married</option>
+                                                <option value="Unmarried">Unmarried</option>
+                                                <option value="Widow">Widow</option>
+                                                <option value="Divorced">Divorced</option>
+                                            </select>
+                                        )}
+                                    </div>
+
+                                    <div className="flex justify-between items-center text-xs py-1">
+                                        <span>4. MTP Method Type</span>
+                                        {isLocked && activeRec ? (
+                                            <span className="font-bold text-slate-800 uppercase">{activeRec.data['Method']}</span>
+                                        ) : (
+                                            <select value={mtpMethod} onChange={(e) => setMtpMethod(e.target.value as any)} className="bg-white border rounded px-2 py-1 text-[11px] font-bold text-slate-700">
+                                                <option value="">-- Select --</option>
+                                                <option value="medical">Medical (MTP Pill Kit)</option>
+                                                <option value="surgical">Surgical (MVA/EVA)</option>
+                                            </select>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/50 flex flex-col gap-4">
+                                    <h4 className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Clinical Details & RMP Opinions</h4>
+                                    
+                                    <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                                        <span>1. Legal RMP Count Required</span>
+                                        <span className="text-blue-600 font-bold uppercase">{gestWeeks <= 20 ? '1 RMP Required (<20w)' : '2 RMPs Required (20-24w)'}</span>
+                                    </div>
+
+                                    <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                                        <span>2. Indication Category</span>
+                                        {isLocked && activeRec ? (
+                                            <span className="font-bold text-slate-800">{activeRec.data['Indication']}</span>
+                                        ) : (
+                                            <select value={mtpIndication} onChange={(e) => setMtpIndication(e.target.value)} className="bg-white border rounded px-2 py-1 text-[11px] font-bold text-slate-700 w-48 truncate">
+                                                <option value="">-- Select --</option>
+                                                <option value="Grave risk to physical/mental health (contraceptive failure)">Contraceptive Failure</option>
+                                                <option value="Grave risk to life of pregnant woman">Danger to Mother's Life</option>
+                                                <option value="Substantial risk of child being born with abnormalities">Fetal Genetic Anomaly</option>
+                                                <option value="Pregnancy caused by rape">Rape Survivor</option>
+                                            </select>
+                                        )}
+                                    </div>
+
+                                    <div className="flex justify-between items-center text-xs py-1 border-b border-slate-100">
+                                        <span>3. Post-Abortion Contraceptive Choice</span>
+                                        {isLocked && activeRec ? (
+                                            <span className="font-bold text-slate-800">{activeRec.data['Contraceptive']}</span>
+                                        ) : (
+                                            <select value={mtpContraception} onChange={(e) => setMtpContraception(e.target.value)} className="bg-white border rounded px-2 py-1 text-[11px] font-bold text-slate-700">
+                                                <option value="None">None</option>
+                                                <option value="IUD Accepted">IUD Accepted</option>
+                                                <option value="Tubectomy">Tubectomy</option>
+                                                <option value="Oral Contraceptive Pills">Oral Pills</option>
+                                                <option value="Condoms">Condoms</option>
+                                            </select>
+                                        )}
+                                    </div>
+
+                                    {gestWeeks > 20 && (
+                                        <div className="flex flex-col gap-2 text-xs">
+                                            <span className="font-semibold text-slate-700">2nd RMP Details (Gest. &gt; 20 weeks)</span>
+                                            {isLocked && activeRec ? (
+                                                <span className="text-slate-800 font-bold">{activeRec.data['Remarks']}</span>
+                                            ) : (
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <input type="text" placeholder="2nd RMP Name..." value={mtpSecondRmpName} onChange={(e) => setMtpSecondRmpName(e.target.value)} className="bg-white border p-2 rounded-xl text-[11px]" />
+                                                    <input type="text" placeholder="Reg No..." value={mtpSecondRmpReg} onChange={(e) => setMtpSecondRmpReg(e.target.value)} className="bg-white border p-2 rounded-xl text-[11px]" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {!isLocked && (
+                                <div className="flex justify-end pt-4 border-t border-slate-100">
+                                    <button
+                                        disabled={!isFullyCompliant}
+                                        onClick={handleLockMtp}
+                                        className="px-6 py-3 bg-amber-500 disabled:opacity-30 disabled:cursor-not-allowed text-slate-900 text-xs font-black uppercase tracking-widest rounded-xl hover:bg-amber-400 transition-colors shadow-md"
+                                    >
+                                        🔒 Lock MTP Admission Register Entry
+                                    </button>
+                                </div>
+                            )}
+
+                            {isLocked && activeRec && (
+                                <div className="flex justify-between items-center pt-4 border-t border-slate-100">
+                                    <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">🔒 Registered as Serial: <strong>{activeRec.data['Serial Number']}</strong></span>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => handlePrintMtpForms(activeRec)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase rounded-xl flex items-center gap-1 shadow-md transition-colors">
+                                            🖨️ Print Document Set
+                                        </button>
+                                        <button onClick={() => { setReprintActiveRecordId(activeRec.id); setShowReprintModal(true); }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase rounded-xl flex items-center gap-1 shadow-md transition-colors">
+                                            🔄 Reprint Set
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {isLocked && activeRec && (
+                            <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-100">
+                                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">MTP Form Previews</h3>
+                                <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl w-fit mb-4">
+                                    <button onClick={() => setMtpTabDocView('doc-form-c')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${mtpTabDocView === 'doc-form-c' ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>Form C (Consent)</button>
+                                    <button onClick={() => setMtpTabDocView('doc-form-i')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${mtpTabDocView === 'doc-form-i' ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>Form I (Opinion - Anonymous)</button>
+                                    <button onClick={() => setMtpTabDocView('doc-consent')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${mtpTabDocView === 'doc-consent' ? 'bg-white text-amber-600 shadow-md' : 'text-slate-500 hover:text-slate-800'}`}>Procedural Consent</button>
+                                </div>
+
+                                <div className="p-6 bg-slate-50 border border-slate-200 rounded-2xl text-slate-800 text-xs leading-relaxed font-sans max-w-3xl">
+                                    {mtpTabDocView === 'doc-form-c' && (() => {
+                                        const textValue = activeRec.data['Form C Text'] || `I, ${activeRec.data['Name']}, daughter/wife of ${activeRec.data['Relation (W/D of)']}, aged ${activeRec.data['Age']} years, residing at ${activeRec.data['Address']}, hereby give my consent for the medical termination of my pregnancy under the Medical Termination of Pregnancy Act, 1971.\n\nMethod of Termination: ${activeRec.data['Method']}`;
+                                        const templatesList = clinicalTemplates.filter(t => t.category === 'mtp_form_c');
+                                        return (
+                                            <div>
+                                                <h4 className="text-center font-bold uppercase underline mb-4 text-sm">Form C (Consent Form)</h4>
+                                                <div className="flex justify-between items-center bg-slate-100 p-2 rounded-xl mb-4">
+                                                    <span className="text-[10px] font-black text-slate-500 uppercase">Interactive Editor</span>
+                                                    <div className="flex items-center gap-2">
+                                                        {templatesList.length > 0 && (
+                                                            <select 
+                                                                onChange={(e) => {
+                                                                    if (e.target.value) {
+                                                                        handleUpdateMtpText('Form C Text', e.target.value);
+                                                                        e.target.value = '';
+                                                                    }
+                                                                }}
+                                                                className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] font-bold text-slate-700 outline-none"
+                                                            >
+                                                                <option value="">-- Load Template --</option>
+                                                                {templatesList.map(t => <option key={t.id} value={t.content}>{t.title}</option>)}
+                                                            </select>
+                                                        )}
+                                                        <button 
+                                                            onClick={() => handleSaveTemplate('mtp_form_c', textValue)} 
+                                                            className="bg-white hover:bg-slate-200 border border-slate-200 text-[9px] font-black uppercase px-2 py-1 rounded shadow-sm"
+                                                        >
+                                                            💾 Save as Template
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <textarea
+                                                    value={textValue}
+                                                    onChange={(e) => handleUpdateMtpText('Form C Text', e.target.value)}
+                                                    className="w-full h-36 bg-white border border-slate-200 rounded-xl p-3 font-bold text-slate-800 focus:outline-none focus:border-amber-500 mb-4"
+                                                />
+                                                <div className="mt-8 flex justify-between">
+                                                    <span>Date: {activeRec.data['Admission Date']}</span>
+                                                    <div className="border-t border-slate-300 pt-1 w-48 text-center font-bold">Signature / Thumb Impression</div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {mtpTabDocView === 'doc-form-i' && (() => {
+                                        const textValue = activeRec.data['Form I Text'] || `We/I, Registered Medical Practitioner(s), state that the termination of pregnancy for Patient Serial Number ${activeRec.data['Serial Number']} is necessitated under Section 3(2)(b)(i) of the Act as the continuation of the pregnancy would involve a risk to the physical or mental health of the pregnant woman.\n\nReason for MTP: ${activeRec.data['Indication']}`;
+                                        const templatesList = clinicalTemplates.filter(t => t.category === 'mtp_form_i');
+                                        return (
+                                            <div>
+                                                <h4 className="text-center font-bold uppercase underline mb-2 text-sm">Form I (RMP Opinion Form)</h4>
+                                                <div className="text-right font-bold text-slate-500 mb-4">Serial Number: {activeRec.data['Serial Number']}</div>
+                                                <div className="flex justify-between items-center bg-slate-100 p-2 rounded-xl mb-4">
+                                                    <span className="text-[10px] font-black text-slate-500 uppercase">Interactive Editor</span>
+                                                    <div className="flex items-center gap-2">
+                                                        {templatesList.length > 0 && (
+                                                            <select 
+                                                                onChange={(e) => {
+                                                                    if (e.target.value) {
+                                                                        handleUpdateMtpText('Form I Text', e.target.value);
+                                                                        e.target.value = '';
+                                                                    }
+                                                                }}
+                                                                className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] font-bold text-slate-700 outline-none"
+                                                            >
+                                                                <option value="">-- Load Template --</option>
+                                                                {templatesList.map(t => <option key={t.id} value={t.content}>{t.title}</option>)}
+                                                            </select>
+                                                        )}
+                                                        <button 
+                                                            onClick={() => handleSaveTemplate('mtp_form_i', textValue)} 
+                                                            className="bg-white hover:bg-slate-200 border border-slate-200 text-[9px] font-black uppercase px-2 py-1 rounded shadow-sm"
+                                                        >
+                                                            💾 Save as Template
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <textarea
+                                                    value={textValue}
+                                                    onChange={(e) => handleUpdateMtpText('Form I Text', e.target.value)}
+                                                    className="w-full h-36 bg-white border border-slate-200 rounded-xl p-3 font-bold text-slate-800 focus:outline-none focus:border-amber-500 mb-4"
+                                                />
+                                                <div className="mt-8 flex justify-between">
+                                                    <div>
+                                                        <p>1. {activeRec.data['RMP Name']}</p>
+                                                        <div className="border-t border-slate-300 pt-1 w-48 text-center mt-8 font-bold">Signature of RMP</div>
+                                                    </div>
+                                                    {activeRec.data['Remarks']?.includes('2nd RMP') ? (
+                                                        <div>
+                                                            <p>2. {activeRec.data['Remarks'].split('2nd RMP: ')[1]?.split(' (')[0] || 'Second RMP'}</p>
+                                                            <div className="border-t border-slate-300 pt-1 w-48 text-center mt-8 font-bold">Signature of RMP</div>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {mtpTabDocView === 'doc-consent' && (() => {
+                                        const textValue = activeRec.data['MTP Consent Text'] || `I, ${activeRec.data['Name']}, authorize ${activeRec.data['RMP Name']} to perform the MTP procedure. I have been informed of the clinical risks, potential complications, and alternative treatments. I agree to accept post-abortion contraceptive advice and have accepted ${activeRec.data['Contraceptive']}.`;
+                                        const templatesList = clinicalTemplates.filter(t => t.category === 'mtp_consent');
+                                        return (
+                                            <div>
+                                                <h4 className="text-center font-bold uppercase underline mb-4 text-sm">MTP Informed Consent Form</h4>
+                                                <div className="flex justify-between items-center bg-slate-100 p-2 rounded-xl mb-4">
+                                                    <span className="text-[10px] font-black text-slate-500 uppercase">Interactive Editor</span>
+                                                    <div className="flex items-center gap-2">
+                                                        {templatesList.length > 0 && (
+                                                            <select 
+                                                                onChange={(e) => {
+                                                                    if (e.target.value) {
+                                                                        handleUpdateMtpText('MTP Consent Text', e.target.value);
+                                                                        e.target.value = '';
+                                                                    }
+                                                                }}
+                                                                className="bg-white border border-slate-200 rounded px-2 py-1 text-[10px] font-bold text-slate-700 outline-none"
+                                                            >
+                                                                <option value="">-- Load Template --</option>
+                                                                {templatesList.map(t => <option key={t.id} value={t.content}>{t.title}</option>)}
+                                                            </select>
+                                                        )}
+                                                        <button 
+                                                            onClick={() => handleSaveTemplate('mtp_consent', textValue)} 
+                                                            className="bg-white hover:bg-slate-200 border border-slate-200 text-[9px] font-black uppercase px-2 py-1 rounded shadow-sm"
+                                                        >
+                                                            💾 Save as Template
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <textarea
+                                                    value={textValue}
+                                                    onChange={(e) => handleUpdateMtpText('MTP Consent Text', e.target.value)}
+                                                    className="w-full h-36 bg-white border border-slate-200 rounded-xl p-3 font-bold text-slate-800 focus:outline-none focus:border-amber-500 mb-4"
+                                                />
+                                                <div className="mt-8 flex justify-between">
+                                                    <span>Date: {activeRec.data['Admission Date']}</span>
+                                                    <div className="border-t border-slate-300 pt-1 w-48 text-center font-bold">Signature / Thumb Impression</div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
+        </div>
+      )}
+
       {/* Main Order Modal – Full-screen on mobile, large modal on desktop */}
       {showOrderModal && selectedPatient && (
         <div className="fixed inset-0 bg-slate-500/50 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4 md:p-6">
@@ -2227,35 +3851,13 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   <button onClick={() => setShowCustomizeModal(true)} className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors">⚙️</button>
                   <button onClick={handlePrintPrescription} className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors">🖨️</button>
                   <button
-                     onClick={(e) => {
-                       const v = visits.find(vis => vis.patientId === selectedPatient.id && !vis.isApproved) || visits.find(vis => vis.patientId === selectedPatient.id && vis.isApproved);
-                       if (e.ctrlKey) {
-                         if (v) handleApprove(v.id);
-                       } else {
-                         handleSaveCaseData(false);
-                         setIsCompleteActive(true);
-                       }
+                     onClick={() => {
+                       handleSaveCaseData(false);
                      }}
                      className="bg-emerald-600 text-white px-5 py-2 rounded-lg font-black uppercase text-[10px] tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
-                     title="Click to Save. Ctrl + Click to Save & Complete Case."
+                     title="Click to Save Case sheet details."
                   >
                      💾 SAVE CASE
-                  </button>
-                  <button
-                     onClick={() => {
-                       if (!isCompleteActive) return;
-                       const v = visits.find(vis => vis.patientId === selectedPatient.id && !vis.isApproved) || visits.find(vis => vis.patientId === selectedPatient.id && vis.isApproved);
-                       if (v) handleApprove(v.id);
-                     }}
-                     disabled={!isCompleteActive}
-                     className={`px-5 py-2 rounded-lg font-black uppercase text-[10px] tracking-widest transition-all shadow-sm ${
-                       isCompleteActive 
-                         ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer' 
-                         : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                     }`}
-                     title={isCompleteActive ? "Click to close and finalize this episode." : "Please save case details first to enable completion."}
-                  >
-                     ✓ COMPLETE CASE
                   </button>
                   <button onClick={() => setShowOrderModal(false)} className="w-8 h-8 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 flex items-center justify-center transition-colors">✖</button>
                 </div>
@@ -2314,7 +3916,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                             {visibleFields
                                 .filter(f => ['labsOrder', 'radiology'].includes(f.id))
                                 .map(f => renderEMRField(f.id))}
-                            
+                            {renderRecentInvestigations()}
                         </div>
                     </div>
                 </div>
@@ -2835,6 +4437,56 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
           </div>
       )}
 
+      {showPastInvestigationsModal && selectedPatient && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[115] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 border border-slate-200 shadow-2xl flex flex-col max-h-[80vh]">
+            <div className="flex justify-between items-center border-b pb-4 mb-4">
+              <div>
+                <h3 className="font-black text-slate-800 uppercase tracking-tight text-lg">📁 Past Investigations</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase">{selectedPatient.name}</p>
+              </div>
+              <button onClick={() => setShowPastInvestigationsModal(false)} className="text-slate-400 hover:text-slate-900 font-black text-2xl">&times;</button>
+            </div>
+            
+            <div className="flex-grow overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+              {labOrders.filter(o => o.patientId === selectedPatient.id && o.status === 'completed' && new Date(o.timestamp).toISOString().slice(0, 10) !== queueDate).map(ord => {
+                const dateStr = new Date(ord.timestamp).toLocaleDateString('en-IN', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                });
+                const isExternal = (ord.reportData as any)?.isExternal;
+                const title = (ord.reportData as any)?.title || (ord.ultrasound ? 'USG Report' : 'Lab Report');
+                
+                return (
+                  <div key={ord.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-200/50">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{title}</p>
+                      <p className="text-[10px] text-slate-400 font-bold">{dateStr}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (isExternal) {
+                          alert(`${title} : ${(ord.reportData as any).externalLink}`);
+                        } else {
+                          setShowReportPreview(ord);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors border border-blue-100"
+                    >
+                      👁️ View
+                    </button>
+                  </div>
+                );
+              })}
+              {labOrders.filter(o => o.patientId === selectedPatient.id && o.status === 'completed' && new Date(o.timestamp).toISOString().slice(0, 10) !== queueDate).length === 0 && (
+                <p className="text-xs text-slate-400 italic text-center py-8">No past investigations found.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Report Preview Modal */}
       {showReportPreview && showReportPreview.reportData && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[120] flex items-center justify-center p-4">
@@ -2873,6 +4525,63 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   </div>
               </div>
           </div>
+      )}
+
+      {/* Quick Template Prompt Modal */}
+      {templatePromptConfig?.isOpen && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl relative flex flex-col text-left">
+            <button onClick={() => setTemplatePromptConfig(null)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-900 font-black text-2xl">&times;</button>
+            <h3 className="font-black text-lg uppercase tracking-tighter mb-2 border-b pb-3 text-slate-800">
+                Template: {templatePromptConfig.label}
+            </h3>
+            
+            <div className="space-y-4 my-4">
+              {templatePromptConfig.category === "Routine ANC" || templatePromptConfig.category === "OB Emergencies" ? (
+                /* ANC Template prompts for LMP */
+                <div>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Last Menstrual Period (LMP) Date</label>
+                  <input 
+                    type="date" 
+                    value={promptLmp} 
+                    onChange={e => setPromptLmp(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 outline-none" 
+                  />
+                  <p className="text-[9px] text-slate-400 mt-1 italic">* This will automatically calculate gestational weeks, EDD, prefill matching uterine exam size, medications, and advice.</p>
+                </div>
+              ) : (
+                /* Gynae/General Templates prompt for Duration and optional LMP */
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Duration of Complaints (e.g. 3 days, 2 months)</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. 3 days"
+                      value={promptDuration} 
+                      onChange={e => setPromptDuration(e.target.value)} 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 outline-none" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Last Menstrual Period (LMP) Date (Optional)</label>
+                    <input 
+                      type="date" 
+                      value={promptLmp} 
+                      onChange={e => setPromptLmp(e.target.value)} 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-800 outline-none" 
+                    />
+                    <p className="text-[9px] text-slate-400 mt-1 italic">* Optional. Entering LMP will automatically compute the Day of Menses.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-3 border-t">
+              <button onClick={() => setTemplatePromptConfig(null)} className="px-4 py-2 border rounded-xl font-black uppercase text-[10px] tracking-wider hover:bg-slate-50">Cancel</button>
+              <button onClick={handleApplyQuickTemplate} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black uppercase text-[10px] tracking-wider shadow">Apply Template</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Customize UI Fields Modal */}
@@ -3186,6 +4895,146 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {showReprintModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+          <div className="bg-white border p-6 rounded-3xl max-w-sm w-full flex flex-col gap-4 text-left shadow-2xl">
+            <div class="text-center">
+              <span className="text-3xl">🔐</span>
+              <h3 className="text-slate-800 font-black text-lg uppercase tracking-wide mt-2">PIN Verification Required</h3>
+              <p className="text-xs text-slate-400 mt-1">Reprinting MTP documents requires RMP credentials.</p>
+            </div>
+            
+            <div>
+              <label className="text-[10px] text-slate-500 font-black uppercase tracking-wider block mb-1">Enter Doctor's PIN</label>
+              <input 
+                type="password" 
+                maxLength={4} 
+                placeholder="••••" 
+                value={reprintPin}
+                onChange={(e) => setReprintPin(e.target.value)}
+                className="w-full text-center p-3 bg-slate-50 text-slate-900 rounded-xl text-lg font-mono border border-slate-200 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] text-slate-500 font-black uppercase tracking-wider block mb-1">Reason for Reprinting</label>
+              <input 
+                type="text" 
+                placeholder="e.g. Original envelope misplaced" 
+                value={reprintReason}
+                onChange={(e) => setReprintReason(e.target.value)}
+                className="w-full p-3 bg-slate-50 text-slate-900 rounded-xl text-xs border border-slate-200 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex gap-2 mt-2">
+              <button 
+                onClick={() => {
+                  setShowReprintModal(false);
+                  setReprintPin('');
+                  setReprintReason('');
+                  setReprintActiveRecordId(null);
+                }} 
+                className="flex-grow py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-wider rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleConfirmReprint} 
+                className="flex-grow py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-900 font-black uppercase text-[10px] tracking-wider rounded-xl transition-colors"
+              >
+                Verify & Print
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Clinical AI Assistant Floating Button & Panel */}
+      {selectedPatient && (
+        <>
+          {/* Floating Action Button */}
+          <button
+            onClick={() => setIsChatOpen(prev => !prev)}
+            className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 z-[105] cursor-pointer"
+            title="Open Clinical AI Assistant"
+          >
+            <span className="text-2xl">💬</span>
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider animate-bounce">AI</span>
+          </button>
+
+          {/* Chat Sidebar Drawer */}
+          {isChatOpen && (
+            <div className="fixed top-0 right-0 bottom-0 w-full md:w-96 bg-white border-l border-slate-200 shadow-2xl z-[106] flex flex-col animate-slide-in text-left">
+              {/* Header */}
+              <div className="p-4 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center shrink-0">
+                <div>
+                  <h3 className="font-black text-xs uppercase tracking-widest text-blue-400">🤖 Clinical AI Assistant</h3>
+                  <p className="text-[10px] font-bold text-slate-300 uppercase mt-0.5">{selectedPatient.name}</p>
+                </div>
+                <button onClick={() => setIsChatOpen(false)} className="text-slate-400 hover:text-white font-black text-xl leading-none">&times;</button>
+              </div>
+
+              {/* Message Feed */}
+              <div className="flex-grow overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar">
+                {chatHistory.length === 0 ? (
+                  <div className="text-center py-12 px-4">
+                    <p className="text-2xl">🩺</p>
+                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider mt-2">Clinical Consultation Assistant</p>
+                    <p className="text-[11px] leading-relaxed text-slate-400 mt-1 max-w-xs mx-auto">
+                      Discuss and finalize the treatment plan, investigations, and patient advice. Click "Apply to Case" to transfer suggestions.
+                    </p>
+                  </div>
+                ) : (
+                  chatHistory.map((msg, idx) => (
+                    <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                      <div className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed font-semibold ${
+                        msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none shadow-sm' : 'bg-white text-slate-700 border border-slate-150 rounded-tl-none shadow-sm'
+                      }`}>
+                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                        
+                        {msg.role === 'assistant' && msg.structured && (
+                          <button
+                            onClick={() => handleApplyAiChatSuggestions(msg.structured)}
+                            className="mt-2.5 w-full bg-emerald-600 text-white font-black text-[9px] uppercase tracking-widest py-1.5 rounded-lg hover:bg-emerald-700 transition flex items-center justify-center gap-1 shadow-sm"
+                          >
+                            📥 Apply to Case Sheet
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {isChatLoading && (
+                  <div className="flex items-center space-x-2 text-slate-400 p-2">
+                    <span className="animate-spin text-xs">🌀</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Gemini is writing...</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Input Form */}
+              <form onSubmit={handleSendChat} className="p-3 border-t bg-white flex gap-2 shrink-0">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  placeholder="Type medical query or instruction..."
+                  className="flex-grow border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-500 text-slate-800"
+                  disabled={isChatLoading}
+                />
+                <button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs uppercase disabled:opacity-40"
+                  disabled={isChatLoading || !chatInput.trim()}
+                >
+                  Send
+                </button>
+              </form>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

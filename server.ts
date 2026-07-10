@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from "express";
 import path from "path";
 import cors from "cors";
@@ -35,12 +36,35 @@ app.use(express.json({ limit: "50mb" }));
     });
   });
 
-  app.get("/api/collection/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
-      const offset = req.query.offset ? parseInt(req.query.offset as string) : undefined;
+  import fs from "fs/promises";
 
+  async function readFromLocalJSON(collectionId: string): Promise<any> {
+      try {
+          const filePath = path.join(process.cwd(), 'data', 'collections', `${collectionId}.json`);
+          const content = await fs.readFile(filePath, 'utf-8');
+          return JSON.parse(content);
+      } catch {
+          return null;
+      }
+  }
+
+  async function writeToLocalJSON(collectionId: string, payload: any): Promise<void> {
+      try {
+          const dirPath = path.join(process.cwd(), 'data', 'collections');
+          await fs.mkdir(dirPath, { recursive: true });
+          const filePath = path.join(dirPath, `${collectionId}.json`);
+          await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+      } catch (e) {
+          console.error("Failed to write local JSON:", e);
+      }
+  }
+
+  app.get("/api/collection/:id", async (req, res) => {
+    const { id } = req.params;
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+    const offset = req.query.offset ? parseInt(req.query.offset as string) : undefined;
+
+    try {
       const fetchTable = async (table: any) => {
         let query: any = db.select().from(table);
         if (limit !== undefined) query = query.limit(limit);
@@ -114,8 +138,28 @@ app.use(express.json({ limit: "50mb" }));
         res.status(404).json({ error: "Not found" });
       }
     } catch (error: any) {
-      console.error(`Error reading collection ${req.params.id}:`, error.message);
-      res.status(500).json({ error: "Internal Server Error" });
+      console.warn(`Database connection failed for GET collection ${id}, falling back to local JSON:`, error.message);
+      const localData = await readFromLocalJSON(id);
+      if (localData) {
+          let payload = localData;
+          let totalCount;
+          if (Array.isArray(payload)) {
+              if (limit !== undefined || offset !== undefined) {
+                  totalCount = payload.length;
+                  const start = offset || 0;
+                  const end = limit !== undefined ? start + limit : undefined;
+                  payload = payload.slice(start, end);
+              }
+          }
+          const resp: any = { payload, updatedAt: new Date() };
+          if (totalCount !== undefined) {
+              resp.totalCount = totalCount;
+              resp.limit = limit;
+              resp.offset = offset;
+          }
+          return res.json(resp);
+      }
+      return res.json({ payload: [], updatedAt: new Date() });
     }
   });
 
@@ -333,6 +377,96 @@ Return ONLY a valid JSON object with these exact keys:
     }
   });
 
+  app.post("/api/parseVoiceRegistration", async (req, res) => {
+    try {
+      const { text } = req.body;
+      const { GoogleGenAI } = await import("@google/genai");
+
+      const apiKey = req.body.apiKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Gemini API key is missing. Please configure it in Settings." });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `You are a medical receptionist assistant.
+We received the following dictated patient registration information: "${text}".
+Extract the structured patient details and return ONLY a valid JSON object matching this structure:
+{
+  "name": "Patient Name (Title-cased)",
+  "age": "Age in years (number as string, or empty string)",
+  "gender": "Male" or "Female" or "Other",
+  "mobile": "10-digit mobile number (string, or empty string)",
+  "address": "City/Area name (string, or empty string)",
+  "type": "general" or "obstetric" or "gynecology" or "infertility"
+}
+If type is not clear: infer "general". If the user says "pregnancy", "anc", "delivery" infer "obstetric". If the user says "infertility", "unable to conceive", "fertility" infer "infertility". If the user says "periods", "discharge", "menopause" infer "gynecology".
+Do not return any extra characters, explanation, or markdown backticks. Return raw JSON.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+
+      let jsonText = response.text || "{}";
+      jsonText = jsonText.replace(/```json/g, "").replace(/```/g, "").trim();
+      res.json(JSON.parse(jsonText));
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to parse voice registration data" });
+    }
+  });
+
+  app.post("/api/parseConsultationConversation", async (req, res) => {
+    try {
+      const { text } = req.body;
+      const { GoogleGenAI } = await import("@google/genai");
+
+      const apiKey = req.body.apiKey || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: "Gemini API key is missing. Please configure it in Settings." });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `You are a medical assistant transcribing a doctor-patient consultation dialogue.
+We received the following raw transcript of the consultation: "${text}".
+
+Analyze this dialogue and extract structured patient record details. Return ONLY a valid JSON object matching this structure:
+{
+  "complaints": "Extracted symptoms and chief complaints (string)",
+  "obstetricHistory": "G-P-A-L obstetric summary or notes (string, or empty)",
+  "menstrualHistory": "Brief cycle description if mentioned (string, or empty)",
+  "lmp": "Last Menstrual Period date in YYYY-MM-DD format (string, or empty)",
+  "generalNotes": "General exam notes, pallor, edema, etc. (string, or empty)",
+  "physicalExam": "Systemic/local examination findings (string, or empty)",
+  "bp": "Blood pressure e.g. 120/80 (string, or empty)",
+  "pulse": "Pulse rate in bpm (string, or empty)",
+  "weight": "Weight in kg (string, or empty)",
+  "spo2": "Oxygen saturation % (string, or empty)",
+  "rx": "List of prescribed medications with dosages (one drug per line, string)",
+  "remarks": "Special instructions, follow-up advice, tests recommended (string, or empty)"
+}
+
+Rules:
+1. Return ONLY the JSON object. Do not wrap in markdown backticks or explanation.
+2. In the "rx" field, list medications clearly (e.g. "Tab Calcium 500mg daily\\nTab Iron twice daily").
+3. Make sure dates are in YYYY-MM-DD format. If date is described relative to today, compute it. Today is ${new Date().toISOString().split('T')[0]}.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+
+      let jsonText = response.text || "{}";
+      jsonText = jsonText.replace(/```json/g, "").replace(/```/g, "").trim();
+      res.json(JSON.parse(jsonText));
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to parse consultation dialogue" });
+    }
+  });
+
   app.post("/api/analyzeUsg", async (req, res) => {
     try {
       const { imageBase64, clinicianNotes, templateId, patientDetails } = req.body;
@@ -458,10 +592,13 @@ Clinician Notes: ${clinicianNotes || 'None provided'}`;
   });
 
   app.post("/api/collection/:id", async (req, res) => {
+    const { id } = req.params;
+    let { payload } = req.body;
+    
+    // Always backup to local JSON file
+    await writeToLocalJSON(id, payload);
+
     try {
-      const { id } = req.params;
-      let { payload } = req.body;
-      
       const isObjectInsteadOfArray = !Array.isArray(payload);
       const itemsToUpdate = isObjectInsteadOfArray ? [payload] : payload;
 
@@ -532,11 +669,9 @@ Clinician Notes: ${clinicianNotes || 'None provided'}`;
              await db.insert(wards).values(w).onConflictDoUpdate({ target: wards.id, set: { ...rest } });
           }
       } else if (id === 'medicationMaster' || id === 'billingRates' || id === 'printSettings' || id === 'hospitalInfo') {
-          // Store directly as JSON object/array in appSettings
           await db.insert(appSettings).values({ key: id, value: req.body.payload })
             .onConflictDoUpdate({ target: appSettings.key, set: { value: req.body.payload, updatedAt: new Date() } });
       } else {
-          // Store in fallbackStore for non-normalized collections
           const existing = await db.select().from(fallbackStore).where(eq(fallbackStore.collection, id));
           if (existing.length > 0) {
             await db.update(fallbackStore)
@@ -551,8 +686,42 @@ Clinician Notes: ${clinicianNotes || 'None provided'}`;
       eventEmitter.emit('update', id);
       res.json({ success: true });
     } catch (error: any) {
-      console.error(`Error writing collection ${req.params.id}:`, error);
-      res.status(500).json({ error: "Internal Server Error" });
+      console.warn(`Database connection failed for POST collection ${id}, saved locally:`, error.message);
+      eventEmitter.emit('update', id);
+      res.json({ success: true, localOnly: true });
+    }
+  });
+
+  app.post("/api/save-env", async (req, res) => {
+    try {
+      const { databaseUrl, geminiKey, firebaseStudioLink } = req.body;
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      
+      let envContent = '';
+      if (databaseUrl) {
+          envContent += `DATABASE_URL="${databaseUrl}"\n`;
+      } else if (process.env.DATABASE_URL) {
+          envContent += `DATABASE_URL="${process.env.DATABASE_URL}"\n`;
+      }
+      
+      if (geminiKey) {
+          envContent += `GEMINI_API_KEY="${geminiKey}"\n`;
+      } else if (process.env.GEMINI_API_KEY) {
+          envContent += `GEMINI_API_KEY="${process.env.GEMINI_API_KEY}"\n`;
+      }
+
+      if (firebaseStudioLink) {
+          envContent += `FIREBASE_STUDIO_LINK="${firebaseStudioLink}"\n`;
+      } else if (process.env.FIREBASE_STUDIO_LINK) {
+          envContent += `FIREBASE_STUDIO_LINK="${process.env.FIREBASE_STUDIO_LINK}"\n`;
+      }
+
+      await fs.writeFile(path.join(process.cwd(), '.env'), envContent, 'utf-8');
+      res.json({ success: true, message: "Environment settings saved. Please restart the backend server to apply database connection changes." });
+    } catch (e: any) {
+      console.error("Failed to write .env file:", e);
+      res.status(500).json({ error: "Failed to write environment configuration" });
     }
   });
 

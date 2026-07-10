@@ -1,0 +1,232 @@
+{
+  "urineLh": {
+    "price": 100,
+    "category": "lab",
+    "name": "Urine LH Test"
+  },
+  "custom_1770461447798": {
+    "name": "follow up consultation ",
+    "category": "opd",
+    "price": 100
+  },
+  "lh": {
+    "category": "lab",
+    "name": "Serum LH",
+    "price": 400
+  },
+  "custom_1770466214523": {
+    "price": 5500,
+    "name": "MTP",
+    "category": "operation"
+  },
+  "rbs": {
+    "category": "lab",
+    "name": "Random Blood Sugar",
+    "price": 50
+  },
+  "tsh": {
+    "price": 300,
+    "name": "TSH",
+    "category": "lab"
+  },
+  "custom_1770480539280": {
+    "category": "anesthesia",
+    "name": "Spinal Anesthesia ",
+    "price": 4000
+  },
+  "custom_1770482015730": {
+    "category": "operation",
+    "name": "PRETERM DELIVERY ",
+    "price": 7500
+  },
+  "hiv": {
+    "price": 100,
+    "name": "HIV I & II",
+    "category": "lab"
+  },
+  "urine": {
+    "category": "lab",
+    "name": "Urine R/M",
+    "price": 100
+  },
+  "t4": {
+    "price": 300,
+    "name": "T4",
+    "category": "lab"
+  },
+  "custom_1770480621259": {
+    "name": "iv 500 ML ",
+    "category": "day_care",
+    "price": 500
+  },
+  "t3": {
+    "price": 300,
+    "name": "T3",
+    "category": "lab"
+  },
+  "cbc": {
+    "price": 200,
+    "name": "Complete Blood Count (CBC)",
+    "category": "lab"
+  },
+  "custom_1770466207560": {
+    "category": "operation",
+    "name": "Instrumental Delivery ",
+    "price": 3000
+  },
+  "bloodGroup": {
+    "name": "Blood Grouping & Rh Typing",
+    "category": "lab",
+    "price": 50
+  },
+  "bloodSugar": {
+    "name": "Random Blood Sugar",
+    "category": "lab",
+    "price": 50
+  },
+  "hbsag": {
+    "price": 100,
+    "name": "HBsAg",
+    "category": "lab"
+  },
+  "vdrl": {
+    "price": 100,
+    "name": "VDRL",
+    "category": "lab"
+  },
+  "fsh": {
+    "category": "lab",
+    "name": "FSH",
+    "price": 400
+  },
+  "ft3": {
+    "category": "lab",
+    "name": "FT3",
+    "price": 300
+  },
+  "custom_1770466268351": {
+    "name": "Medication Package for LSCS",
+    "category": "medication_package",
+    "price": 8500
+  },
+  "hba1c": {
+    "price": 300,
+    "name": "HbA1c",
+    "category": "lab"
+  },
+  "custom_1770466138581": {
+    "category": "operation",
+    "name": "LSCS CHARGES ",
+    "price": 18000
+  },
+  "custom_1770480549965": {
+    "price": 500,
+    "name": "Local Anesthesia ",
+    "category": "anesthesia"
+  },
+  "custom_1770461460140": {
+    "name": "im injection ",
+    "category": "day_care",
+    "price": 50
+  },
+  "ultrasound": {
+    "category": "day_care",
+    "name": "Ultrasound",
+    "price": 800
+  },
+  "custom_1770480579531": {
+    "price": 2200,
+    "category": "medication_package",
+    "name": "FTND MEDICATION PACKAGE "
+  },
+  "prolactin": {
+    "price": 400,
+    "name": "Serum Prolactin",
+    "category": "lab"
+  },
+  "custom_1770466193299": {
+    "price": 7000,
+    "category": "operation",
+    "name": "FTND Charges "
+  },
+  "serology": {
+    "category": "lab",
+    "name": "Serology (HIV/HBsAg/VDRL)",
+    "price": 300
+  },
+  "widal": {
+    "category": "lab",
+    "name": "Widal Test",
+    "price": 300
+  },
+  "amh": {
+    "price": 800,
+    "category": "lab",
+    "name": "AMH"
+  },
+  "custom_1770480594946": {
+    "category": "medication_package",
+    "name": "D&C MED PACKAGE ",
+    "price": 1000
+  },
+  "custom_1770466168376": {
+    "price": 18000,
+    "name": "Abdominal Hysterectomy ",
+    "category": "operation"
+  },
+  "custom_1770482033328": {
+    "category": "operation",
+    "name": "IUD",
+    "price": 10000
+  },
+  "custom_1770466227998": {
+    "price": 12000,
+    "category": "operation",
+    "name": "Lap TL "
+  },
+  "custom_1770480651183": {
+    "name": "IV INJECTION ",
+    "category": "day_care",
+    "price": 100
+  },
+  "custom_1770480635106": {
+    "price": 100,
+    "name": "SCALPEL CANULA ",
+    "category": "day_care"
+  },
+  "upt": {
+    "name": "Urine Pregnancy Test (UPT)",
+    "category": "lab",
+    "price": 100
+  },
+  "custom_1770461434507": {
+    "price": 200,
+    "name": "new consultation ",
+    "category": "opd"
+  },
+  "crp": {
+    "price": 300,
+    "category": "lab",
+    "name": "CRP"
+  },
+  "ft4": {
+    "price": 300,
+    "category": "lab",
+    "name": "FT4"
+  },
+  "custom_1770466179792": {
+    "name": "Anesthesia Charges ",
+    "category": "operation",
+    "price": 4000
+  },
+  "custom_1770466246582": {
+    "name": "Short GA",
+    "category": "anesthesia",
+    "price": 2500
+  },
+  "custom_1770480642924": {
+    "category": "day_care",
+    "name": "IV CANULA ",
+    "price": 200
+  }
+}

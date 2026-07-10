@@ -1,0 +1,116 @@
+[
+  {
+    "name": "room 1",
+    "id": "w-1770458057223",
+    "beds": [
+      {
+        "number": "1",
+        "currentAdmissionId": "ipd-1770458137419",
+        "pricePerDay": 1000,
+        "id": "b-1770458072809",
+        "status": "occupied",
+        "type": "private"
+      }
+    ]
+  },
+  {
+    "name": "room 2",
+    "beds": [
+      {
+        "number": "2",
+        "pricePerDay": 800,
+        "currentAdmissionId": "ipd-1770464815601",
+        "status": "occupied",
+        "type": "private",
+        "id": "b-1770458097286"
+      }
+    ],
+    "id": "w-1770458080431"
+  },
+  {
+    "beds": [
+      {
+        "pricePerDay": 1000,
+        "number": "1",
+        "id": "b-1770490983345",
+        "type": "private",
+        "status": "available"
+      }
+    ],
+    "id": "w-1770490979194",
+    "name": "room 3"
+  },
+  {
+    "id": "w-1770490998423",
+    "beds": [
+      {
+        "status": "available",
+        "type": "private",
+        "id": "b-1770491001923",
+        "number": "1",
+        "pricePerDay": 800
+      }
+    ],
+    "name": "room 4"
+  },
+  {
+    "id": "w-1770491007915",
+    "beds": [
+      {
+        "id": "b-1770491010489",
+        "status": "available",
+        "type": "private",
+        "pricePerDay": 800,
+        "number": "1"
+      }
+    ],
+    "name": "room 5"
+  },
+  {
+    "id": "w-1770491024111",
+    "beds": [
+      {
+        "pricePerDay": 800,
+        "number": "1",
+        "type": "private",
+        "status": "available",
+        "id": "b-1770491026933"
+      }
+    ],
+    "name": "room 6 "
+  },
+  {
+    "beds": [
+      {
+        "pricePerDay": 500,
+        "number": "1",
+        "status": "available",
+        "id": "b-1770491051200",
+        "type": "general"
+      },
+      {
+        "pricePerDay": 500,
+        "number": "2",
+        "type": "general",
+        "status": "available",
+        "id": "b-1770491053625"
+      },
+      {
+        "type": "general",
+        "status": "available",
+        "id": "b-1770491056339",
+        "pricePerDay": 500,
+        "number": "3"
+      },
+      {
+        "id": "b-1770491058984",
+        "type": "general",
+        "status": "available",
+        "number": "4",
+        "pricePerDay": 500
+      }
+    ],
+    "id": "w-1770491033989",
+    "name": "general ward"
+  }
+]

@@ -1,9 +1,37 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { CbcReportData, PharmacyItem, DailyRoundNote, LabourProgressEntry, PostOperativeNote, IpdDischargeSummary, IpdMedicationChartEntry, IpdAdmissionNote, IpdRoundNote } from '../types';
+import { getCachedCompletion, saveCachedCompletion } from './firebaseService';
 
-// Fix: Ensure GoogleGenAI initialization uses named parameter with API key from process.env.API_KEY
+// Simple fast hash generator
+export const hashKey = (str: string): string => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = (hash << 5) - hash + char;
+        hash = hash & hash;
+    }
+    return Math.abs(hash).toString(36);
+};
+
+const getLocalCache = (key: string) => {
+    try {
+        const cached = localStorage.getItem(`ai_cache_${key}`);
+        return cached ? JSON.parse(cached) : null;
+    } catch {
+        return null;
+    }
+};
+
+const saveLocalCache = (key: string, value: any) => {
+    try {
+        localStorage.setItem(`ai_cache_${key}`, JSON.stringify(value));
+    } catch (e) {
+        // ignore
+    }
+};
+
 const apiKeyVal = process.env.API_KEY || process.env.GEMINI_API_KEY || "DUMMY_KEY";
+console.log("Client-side Gemini API Key initialized:", apiKeyVal !== "DUMMY_KEY" ? `Yes (starts with ${apiKeyVal.substring(0, 6)})` : "No (using DUMMY_KEY)");
 const ai = new GoogleGenAI({ apiKey: apiKeyVal });
 
 export const extractPatientDataFromId = async (base64Image: string, mimeType: string) => {
@@ -745,6 +773,23 @@ export const executeAiComplete = async (
         .map(([k, v]) => `- ${k}: ${v}`)
         .join('\n');
 
+    // Caching layer
+    const rawKey = JSON.stringify({ formType, currentFieldsStr, customPrompt });
+    const hash = hashKey(rawKey);
+
+    const cached = getLocalCache(hash);
+    if (cached) {
+        console.log("AI Completion Cache Hit (Local):", hash);
+        return cached;
+    }
+
+    const cloudCached = await getCachedCompletion(hash);
+    if (cloudCached) {
+        console.log("AI Completion Cache Hit (Cloud):", hash);
+        saveLocalCache(hash, cloudCached);
+        return cloudCached;
+    }
+
     const prompt = `
 You are an expert clinical EMR assistant. Your task is to perform an autocompletion or complete fill of the current clinical form type: "${formType}".
 
@@ -790,7 +835,10 @@ CRITICAL MEDICAL & AUTOFILL RULES:
         return JSON.parse(cleanText.trim());
     };
 
-    return safeJsonParse(response.text);
+    const result = safeJsonParse(response.text);
+    saveLocalCache(hash, result);
+    await saveCachedCompletion(hash, result);
+    return result;
 };
 
 export const generatePrintText = async (promptText: string, type: 'header' | 'footer'): Promise<string> => {
@@ -807,6 +855,47 @@ export const generatePrintText = async (promptText: string, type: 'header' | 'fo
         contents: prompt,
     });
     
+    return response.text.trim();
+};
+
+export const chatWithClinicalAssistant = async (
+    messages: { role: 'user' | 'assistant'; content: string }[],
+    patientContext: string
+): Promise<string> => {
+    let conversationHistory = "";
+    for (const msg of messages) {
+        conversationHistory += `\n${msg.role === 'user' ? 'Doctor' : 'Assistant'}: ${msg.content}`;
+    }
+
+    const prompt = `
+You are a context-aware Clinical AI Assistant helping a doctor finalize their plan of treatment, investigations, and patient advice.
+
+Patient Clinical Context:
+${patientContext}
+
+Conversation History:${conversationHistory}
+
+Rules:
+1. Always base your advice on the patient's vitals, history, and calculated POG (if obstetric).
+2. Answer concisely, clinically, and practically.
+3. If you recommend specific medicines, lab tests, or follow-up plans, YOU MUST append a structured JSON block at the very end of your response inside a markdown code block so the EMR can parse it:
+\`\`\`json
+{
+  "prescription": "Tab DrugName strength frequency duration\\nTab DrugName2...",
+  "remarks": "Advice and instructions to patient",
+  "diagnosis": "Provisional diagnosis text"
+}
+\`\`\`
+4. Keep the JSON keys and values strictly clinical and matching EMR inputs.
+
+Assistant:
+`;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+    });
+
     return response.text.trim();
 };
 

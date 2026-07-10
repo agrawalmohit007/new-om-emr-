@@ -1,0 +1,26 @@
+[
+  {
+    "subTotal": 203.28,
+    "items": [
+      {
+        "rate": 203.28,
+        "batch": "C1APY039",
+        "gst": 0,
+        "expiry": "12-26",
+        "name": "RANIDOM RAFT SY. (200ML)",
+        "amount": 203.28,
+        "qty": 1,
+        "itemId": "ph-1770492057244-q3kv88rr4"
+      }
+    ],
+    "doctorName": "Self",
+    "invoiceNo": "PH-902273",
+    "paymentMethod": "cash",
+    "grandTotal": 203,
+    "id": "INV-1772202902273",
+    "patientName": "abc",
+    "discount": 0,
+    "totalGst": 0,
+    "date": "2026-02-27T14:35:02.273Z"
+  }
+]

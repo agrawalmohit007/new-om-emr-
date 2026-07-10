@@ -23,7 +23,7 @@ interface AdminPanelProps {
   onUpdateReports: (data: SavedReport[]) => void;
   onUpdatePatients: (data: Patient[]) => void;
   onUpdateLabOrders: (data: LabOrder[]) => void;
-  onUpdateVisits: (data: VisitRecord[]) => void;
+  onUpdateVisits: (data: VisitRecord[] | ((prev: VisitRecord[]) => VisitRecord[])) => void;
   onUpdateConsultants: (data: Consultant[]) => void;
   onUpdateSpecialties: (data: Specialty[]) => void;
   onUpdateBillingRates: (data: ServicePrices) => void;

@@ -1,0 +1,78 @@
+[
+  {
+    "pin": "1401",
+    "followUpFee": 100,
+    "roles": [
+      "doctor",
+      "opd",
+      "ipd",
+      "lab",
+      "pharmacy",
+      "master",
+      "superadmin",
+      "admin",
+      "global_stats",
+      "usg",
+      "analytics"
+    ],
+    "department": "obgyn",
+    "isActive": true,
+    "baseFee": 200,
+    "specialty": "",
+    "id": "1770353349481",
+    "name": "Dr Mohit Agrawal"
+  },
+  {
+    "roles": [
+      "doctor",
+      "lab",
+      "opd",
+      "ipd",
+      "master",
+      "global_stats"
+    ],
+    "pin": "0608",
+    "followUpFee": 100,
+    "isActive": true,
+    "department": "obgyn",
+    "baseFee": 200,
+    "specialty": "",
+    "id": "1770357381956",
+    "name": "DR Parul Agrawal"
+  },
+  {
+    "roles": [
+      "doctor",
+      "opd",
+      "ipd",
+      "global_stats"
+    ],
+    "pin": "1411",
+    "followUpFee": 200,
+    "isActive": true,
+    "department": "obgyn",
+    "baseFee": 300,
+    "specialty": "",
+    "id": "1770461566451",
+    "name": "Dr Manjulata Agrawal"
+  },
+  {
+    "isActive": true,
+    "department": "surgery",
+    "roles": [
+      "doctor",
+      "opd",
+      "lab",
+      "ipd",
+      "pharmacy",
+      "master",
+      "global_stats"
+    ],
+    "followUpFee": 100,
+    "pin": "0709",
+    "name": "dr omprakash agrawal",
+    "id": "1770461606568",
+    "specialty": "",
+    "baseFee": 200
+  }
+]

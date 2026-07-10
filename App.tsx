@@ -92,7 +92,13 @@ const App: React.FC = () => {
       if (key === 'clinicalTemplates') setClinicalTemplates(data || []);
       if (key === 'labInventory') setInventory(data || []);
       if (key === 'reportHistory') setReportHistory(data || []);
-      if (key === 'notifications') setActiveNotification(data);
+      if (key === 'notifications') {
+          if (!data || data === "" || (Array.isArray(data) && data.length === 0)) {
+              setActiveNotification(null);
+          } else {
+              setActiveNotification(data);
+          }
+      }
       if (key === 'printSettings') {
           if (data) {
               setPrintSettings(data);
@@ -142,6 +148,7 @@ const App: React.FC = () => {
           }
       }
       if (key === 'registryTemplates') {
+          const mtpDefault = { id: 'mtp_register', name: 'MTP Admission Register (Form III)', fields: ['Serial Number', 'Admission Date', 'Name', 'Relation (W/D of)', 'Age', 'Religion', 'Address', 'Marital Status', 'Gest. Weeks', 'Indication', 'Method', 'Date MTP', 'Date Discharge', 'Contraceptive', 'RMP Name', 'Remarks'], isMandatory: true };
           if (!data || data.length === 0) {
               const defaults: RegistryTemplate[] = [
                   { id: '1', name: 'High Risk Pregnancy Register', fields: ['Date', 'Patient Name', 'Age', 'Parity', 'LMP', 'EDD', 'Risk Factors', 'Action Taken', 'Outcome'], isMandatory: true },
@@ -149,11 +156,19 @@ const App: React.FC = () => {
                   { id: '3', name: 'MDR (Maternal Death Review)', fields: ['Date of Death', 'Patient Name', 'Age', 'Parity', 'Admission Date', 'Cause of Death', 'Review Committee Notes'], isMandatory: true },
                   { id: '4', name: 'OT Register', fields: ['Date', 'Patient Name', 'Age', 'Procedure', 'Surgeon', 'Anesthetist', 'Anesthesia Type', 'Complications'], isMandatory: true },
                   { id: '5', name: 'Delivery Register', fields: ['Date & Time', 'Patient Name', 'Age', 'Parity', 'Mode of Delivery', 'Baby Sex', 'Baby Weight', 'Apgar Score', 'Complications', 'Conducted By'], isMandatory: true },
+                  mtpDefault
               ];
               setRegistryTemplates(defaults);
               syncToCloud('registryTemplates', defaults);
           } else {
-              setRegistryTemplates(data);
+              const hasMtp = data.some((t: any) => t.id === 'mtp_register');
+              if (!hasMtp) {
+                  const updated = [...data, mtpDefault];
+                  setRegistryTemplates(updated);
+                  syncToCloud('registryTemplates', updated);
+              } else {
+                  setRegistryTemplates(data);
+              }
           }
       }
       
@@ -295,7 +310,13 @@ const App: React.FC = () => {
   };
 
   const updatePatients = (data: Patient[]) => { setPatients(data); syncToCloud('patients', data); };
-  const updateVisits = (data: VisitRecord[]) => { setVisits(data); syncToCloud('visits', data); };
+  const updateVisits = (data: VisitRecord[] | ((prev: VisitRecord[]) => VisitRecord[])) => {
+    setVisits(prev => {
+        const next = typeof data === 'function' ? data(prev) : data;
+        syncToCloud('visits', next);
+        return next;
+    });
+  };
   const updateLabOrders = (data: LabOrder[]) => { setLabOrders(data); syncToCloud('labOrders', data); };
   const updateClinicalTemplates = (data: ClinicalTemplate[]) => { setClinicalTemplates(data); syncToCloud('clinicalTemplates', data); };
   const updateInventory = (data: InventoryItem[]) => { setInventory(data); syncToCloud('labInventory', data); };
@@ -357,12 +378,14 @@ const App: React.FC = () => {
            ipdAdmissions={ipdAdmissions}
            consultants={consultants}
            registryTemplates={registryTemplates}
-          onUpdateVisits={updateVisits} 
-          onUpdatePatients={updatePatients} 
-          onUpdateTemplates={updateClinicalTemplates} 
-          onOrderLab={(o) => updateLabOrders([...labOrders, o])} 
-          onCancelOrder={(id) => updateLabOrders(labOrders.filter(o => o.id !== id))} 
-          onCallPatient={sendNotification} 
+           registryRecords={registryRecords}
+           onUpdateRecords={(r) => { setRegistryRecords(r); syncToCloud('registryRecords', r); }}
+           onUpdateVisits={updateVisits} 
+           onUpdatePatients={updatePatients} 
+           onUpdateTemplates={updateClinicalTemplates} 
+           onOrderLab={(o) => updateLabOrders([...labOrders, o])} 
+           onCancelOrder={(id) => updateLabOrders(labOrders.filter(o => o.id !== id))} 
+           onCallPatient={sendNotification} 
         />;
       case 'lab':
         return <LabView 
@@ -463,8 +486,11 @@ const App: React.FC = () => {
           patients={patients}
           admissions={ipdAdmissions}
           visits={visits}
+          consultants={consultants}
           onUpdateTemplates={(t) => { setRegistryTemplates(t); syncToCloud('registryTemplates', t); }}
           onUpdateRecords={(r) => { setRegistryRecords(r); syncToCloud('registryRecords', r); }}
+          clinicalTemplates={clinicalTemplates}
+          onUpdateClinicalTemplates={updateClinicalTemplates}
         />;
       case 'usg':
         return <UsgSection

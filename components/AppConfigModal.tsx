@@ -56,11 +56,26 @@ const AppConfigModal: React.FC<AppConfigModalProps> = ({
     const [lscsFee, setLscsFee] = useState<number>(billingRates['lscs']?.price || 15000);
     const [spinalAnesFee, setSpinalAnesFee] = useState<number>(billingRates['spinal_anesthesia']?.price || 3500);
 
-    const handleSaveGeneralConfig = () => {
+    const handleSaveGeneralConfig = async () => {
         // Save local override for frontend Gemini calls
         localStorage.setItem('gemini_api_key', configState.geminiKey);
+        
+        try {
+            await fetch('/api/save-env', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    databaseUrl: configState.databaseUrl,
+                    geminiKey: configState.geminiKey,
+                    firebaseStudioLink: configState.firebaseStudioLink
+                })
+            });
+        } catch (e) {
+            console.error("Failed to sync environment configuration:", e);
+        }
+
         onUpdateConfig(configState);
-        alert("System Configuration Saved");
+        alert("System Configuration Saved. Please restart the backend server to apply database connection changes.");
     };
 
     const handleAddUser = (e: React.FormEvent) => {
@@ -172,7 +187,7 @@ const AppConfigModal: React.FC<AppConfigModalProps> = ({
                 <div className="p-8 overflow-y-auto flex-grow custom-scrollbar">
                     {activeTab === 'general' && (
                         <div className="space-y-6">
-                            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
                                 <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 border-b pb-2 mb-4">Gemini API Key</h3>
                                 <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Enter Key for AI Registry Auto-Population & Voice features</label>
                                 <input
@@ -181,6 +196,30 @@ const AppConfigModal: React.FC<AppConfigModalProps> = ({
                                     onChange={e => setConfigState({ ...configState, geminiKey: e.target.value })}
                                     className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold focus:ring-4 focus:ring-blue-50 outline-none transition-all text-sm font-mono"
                                     placeholder="AIzaSy..."
+                                />
+                            </div>
+
+                            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                                <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 border-b pb-2 mb-4">Firebase Studio Storage Link</h3>
+                                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Firebase cloud backup synchronization link (optional)</label>
+                                <input
+                                    type="text"
+                                    value={configState.firebaseStudioLink || ''}
+                                    onChange={e => setConfigState({ ...configState, firebaseStudioLink: e.target.value })}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold focus:ring-4 focus:ring-blue-50 outline-none transition-all text-sm font-mono"
+                                    placeholder="https://..."
+                                />
+                            </div>
+
+                            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                                <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 border-b pb-2 mb-4">Database Connection String (Supabase/PostgreSQL)</h3>
+                                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Drizzle connection URI for this facility's local or cloud database</label>
+                                <input
+                                    type="password"
+                                    value={configState.databaseUrl || ''}
+                                    onChange={e => setConfigState({ ...configState, databaseUrl: e.target.value })}
+                                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 font-bold focus:ring-4 focus:ring-blue-50 outline-none transition-all text-sm font-mono"
+                                    placeholder="postgresql://user:pass@host:port/db"
                                 />
                             </div>
 

@@ -461,6 +461,8 @@ export interface AppConfig {
     };
     isMedMasterSetupDone: boolean;
     isBillingSetupDone: boolean;
+    databaseUrl?: string;
+    firebaseStudioLink?: string;
 }
 
 // --- IPD TYPES ---

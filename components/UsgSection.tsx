@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Patient, LabOrder, Consultant, AppPrintSettings } from '../types';
+import { useVoiceDictation } from '../services/voiceService';
 
 const USG_TEMPLATES = [
     { id: 'ROUTINE_1ST_TRIMESTER', label: '1st Trimester Routine OB Scan' },
@@ -204,6 +205,13 @@ export const UsgSection: React.FC<UsgSectionProps> = ({
     // Simulated OCR States
     const [isOcrLoading, setIsOcrLoading] = useState(false);
     const [isLiveVideo, setIsLiveVideo] = useState(false);
+
+    const { isRecording: isUsgRecording, start: startUsgVoice } = useVoiceDictation((text) => {
+        setPndtForm(prev => ({
+            ...prev,
+            conclusion: prev.conclusion ? `${prev.conclusion}\n${text.toUpperCase()}` : text.toUpperCase()
+        }));
+    });
 
     // Load selected waitlist data into report fields
     useEffect(() => {
@@ -927,7 +935,16 @@ export const UsgSection: React.FC<UsgSectionProps> = ({
                                           </div>
 
                                           <div>
-                                               <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Obstetric Sonography Conclusion</label>
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <label className="text-[9px] font-black text-slate-500 uppercase block">Obstetric Sonography Conclusion</label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={startUsgVoice}
+                                                        className={`px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase transition-all flex items-center gap-1 shadow active:scale-95 ${isUsgRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-800 text-white hover:bg-slate-900'}`}
+                                                    >
+                                                        {isUsgRecording ? '🎙️ Dictating...' : '🎙️ Dictate Report'}
+                                                    </button>
+                                                </div>
                                                <textarea 
                                                     value={pndtForm.conclusion}
                                                     onChange={e => setPndtForm(prev => ({...prev, conclusion: e.target.value}))}

@@ -1,0 +1,90 @@
+[
+  {
+    "id": "1770489558165",
+    "pin": "1234",
+    "roles": [
+      "opd",
+      "lab",
+      "ipd"
+    ],
+    "name": "Arpit ",
+    "isActive": true
+  },
+  {
+    "name": "Nayna",
+    "isActive": true,
+    "roles": [
+      "nurse"
+    ],
+    "pin": "1234",
+    "id": "1770489576149"
+  },
+  {
+    "id": "1770489589026",
+    "pin": "1234",
+    "roles": [
+      "opd",
+      "ipd"
+    ],
+    "isActive": true,
+    "name": "kavita"
+  },
+  {
+    "name": "Sanju Rana",
+    "isActive": true,
+    "id": "1770489606042",
+    "pin": "1234",
+    "roles": [
+      "opd",
+      "lab",
+      "ipd"
+    ]
+  },
+  {
+    "roles": [
+      "opd",
+      "lab",
+      "ipd"
+    ],
+    "id": "1770489625402",
+    "pin": "1234",
+    "name": "Akshay",
+    "isActive": true
+  },
+  {
+    "pin": "1234",
+    "id": "1770489780849",
+    "roles": [
+      "opd"
+    ],
+    "name": "opd counter ",
+    "isActive": true
+  },
+  {
+    "isActive": true,
+    "name": "ipd counter",
+    "id": "1770489791063",
+    "pin": "1234",
+    "roles": [
+      "ipd"
+    ]
+  },
+  {
+    "isActive": true,
+    "name": "lab counter ",
+    "id": "1770489801246",
+    "pin": "1234",
+    "roles": [
+      "lab"
+    ]
+  },
+  {
+    "isActive": true,
+    "name": "pharmacy counter ",
+    "roles": [
+      "pharmacy"
+    ],
+    "id": "1770491265131",
+    "pin": "1234"
+  }
+]

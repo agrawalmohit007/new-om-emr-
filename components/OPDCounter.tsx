@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Patient, VisitRecord, PatientType, VisitType, PregnancyInfo, Vitals, LabOrder, Consultant, AppPrintSettings, ServicePrices, Ward, IpdAdmission, RegistryTemplate } from '../types';
 import { extractPatientDataFromId } from '../services/geminiService';
 import { syncToCloud } from '../services/firebaseService';
+import { useVoiceDictation } from '../services/voiceService';
 import { calculateLabFeesForOrder, DEFAULT_PRICES } from '../services/billingService';
 import ReportPreview from './ReportPreview';
 import { numberToWords } from '../services/numberToWords';
@@ -17,7 +18,7 @@ interface OPDCounterProps {
   admissions?: IpdAdmission[];
   registryTemplates?: RegistryTemplate[];
   onRegister: (p: Patient, v: VisitRecord) => void;
-  onUpdateVisits: (v: VisitRecord[]) => void;
+  onUpdateVisits: (v: VisitRecord[] | ((prev: VisitRecord[]) => VisitRecord[])) => void;
   onAddAdmission?: (admission: IpdAdmission) => void;
 }
 
@@ -62,6 +63,39 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
 
   const [lmp, setLmp] = useState('');
   const [isProcessingId, setIsProcessingId] = useState(false);
+  const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+
+  const { isRecording: isVoiceRecording, start: startVoiceRegistration } = useVoiceDictation(async (text) => {
+      setIsVoiceProcessing(true);
+      try {
+          const response = await fetch('/api/parseVoiceRegistration', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text })
+          });
+          if (response.ok) {
+              const data = await response.json();
+              setFormData(prev => ({
+                  ...prev,
+                  name: data.name || prev.name,
+                  age: data.age || prev.age,
+                  gender: data.gender || prev.gender,
+                  mobile: data.mobile || prev.mobile,
+                  address: data.address || prev.address,
+                  type: data.type || prev.type
+              }));
+              alert("Voice details parsed and filled out!");
+          } else {
+              alert("Failed to parse voice details.");
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Error parsing voice registration.");
+      } finally {
+          setIsVoiceProcessing(false);
+      }
+  });
+
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [editingVisit, setEditingVisit] = useState<VisitRecord | null>(null);
   const [parentCaseId, setParentCaseId] = useState<string>('new_case'); // Link to open case
@@ -317,13 +351,14 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
       const grandTotal = subTotal - billDiscount;
       const billNo = selectedVisitForBill.finalBill?.billNumber || `B-${Date.now().toString().slice(-6)}`;
 
+      const collector = selectedVisitForBill.collectedBy || 'Receptionist';
       const finalBill = {
           billNumber: billNo,
           items: billItems,
           subTotal,
           discount: billDiscount,
           grandTotal,
-          collectedBy: selectedVisitForBill.collectedBy || 'OPD Counter',
+          collectedBy: collector,
           paymentMethod: method,
           date: new Date().toISOString()
       };
@@ -332,6 +367,7 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
           ...v, 
           paymentStatus: 'paid', 
           paymentMethod: method, 
+          collectedBy: collector,
           finalBill: finalBill
       } as VisitRecord : v);
       
@@ -488,10 +524,19 @@ const OPDCounter: React.FC<OPDCounterProps> = ({ patients, visits, labOrders, co
                       <input type="date" value={viewDate} onChange={e => setViewDate(e.target.value)} className="bg-transparent font-bold text-slate-800 outline-none text-sm" />
                   </div>
                   {!editingPatient && (
-                    <label className="bg-blue-600 text-white px-6 py-2 rounded-xl font-black cursor-pointer hover:bg-blue-700 transition-all shadow-lg active:scale-95 text-xs uppercase tracking-widest">
-                      {isProcessingId ? '🤖 Reading ID...' : '📸 Scan Identity Card'}
-                      <input type="file" className="hidden" accept="image/*" onChange={handleIdUpload} />
-                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={startVoiceRegistration}
+                        className={`px-6 py-2 rounded-xl font-black transition-all shadow-lg active:scale-95 text-xs uppercase tracking-widest flex items-center gap-1.5 ${isVoiceRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-800 text-white hover:bg-slate-900'}`}
+                      >
+                        {isVoiceProcessing ? '🤖 Parsing...' : (isVoiceRecording ? '🎙️ Listening...' : '🎙️ Dictate Details')}
+                      </button>
+                      <label className="bg-blue-600 text-white px-6 py-2 rounded-xl font-black cursor-pointer hover:bg-blue-700 transition-all shadow-lg active:scale-95 text-xs uppercase tracking-widest">
+                        {isProcessingId ? '🤖 Reading ID...' : '📸 Scan Identity Card'}
+                        <input type="file" className="hidden" accept="image/*" onChange={handleIdUpload} />
+                      </label>
+                    </div>
                   )}
               </div>
             </div>

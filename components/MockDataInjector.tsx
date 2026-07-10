@@ -6,7 +6,7 @@ interface MockDataInjectorProps {
     visits: VisitRecord[];
     labOrders: LabOrder[];
     onUpdatePatients: (p: Patient[]) => void;
-    onUpdateVisits: (v: VisitRecord[]) => void;
+    onUpdateVisits: (v: VisitRecord[] | ((prev: VisitRecord[]) => VisitRecord[])) => void;
     onUpdateLabOrders: (o: LabOrder[]) => void;
 }
 

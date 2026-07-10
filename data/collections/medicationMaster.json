@@ -1,0 +1,82 @@
+{
+  "frequencies": [
+    "BD",
+    "OD",
+    "TDS",
+    "HS",
+    "QID",
+    "1-1-1",
+    "1-0-0",
+    "0-0-1",
+    "0-1-0"
+  ],
+  "groups": [
+    "1st trimistere ",
+    "IRON",
+    "Calcium"
+  ],
+  "instructions": [
+    "After Food",
+    "Before Food "
+  ],
+  "drugs": [
+    {
+      "defaultFrequency": "OD",
+      "defaultAdvice": "Before Food ",
+      "name": "Tab Periset MD ",
+      "group": "1st trimistere ",
+      "id": "1769779031248",
+      "defaultDuration": "20",
+      "defaultDose": "4 mg "
+    },
+    {
+      "name": "Tab Stemetil ",
+      "id": "1769779040437",
+      "group": "1st trimistere "
+    },
+    {
+      "name": "Tab Graniset ",
+      "id": "1769779048921",
+      "group": "1st trimistere "
+    },
+    {
+      "id": "1769779077186",
+      "group": "IRON",
+      "name": "Tab Hbster "
+    },
+    {
+      "name": "Tab Hemtree Plus ",
+      "id": "1769779083610",
+      "group": "IRON"
+    },
+    {
+      "group": "IRON",
+      "id": "1769779093159",
+      "name": "Tab Cera Xt "
+    },
+    {
+      "group": "Calcium",
+      "id": "1769779108751",
+      "name": "Cap Vebaplus"
+    },
+    {
+      "group": "Calcium",
+      "id": "1769779115362",
+      "name": "Cab Nidical"
+    },
+    {
+      "name": "Tab Caltwist",
+      "id": "1769779129741",
+      "group": "Calcium"
+    },
+    {
+      "defaultDuration": "30",
+      "defaultDose": "500mg",
+      "group": "IRON",
+      "id": "1770454560501",
+      "defaultAdvice": "After Food",
+      "defaultFrequency": "0-0-1",
+      "name": "tab befer "
+    }
+  ]
+}

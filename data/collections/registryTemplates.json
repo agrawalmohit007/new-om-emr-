@@ -1,0 +1,453 @@
+[
+  {
+    "id": "reg_1782551465139",
+    "fields": [
+      "Patient Name",
+      "Hospital ID",
+      "Age",
+      "Date of Admission to Labour Room",
+      "Time of Admission to Labour Room",
+      "Gravida",
+      "Parity",
+      "LMP / EDD",
+      "Gestational Age (Weeks)",
+      "High Risk Factors",
+      "Cervical Dilation (on Admission)",
+      "Fetal Heart Rate (on Admission)",
+      "Time of Rupture of Membranes",
+      "Liquor Character",
+      "Analgesia Administered",
+      "Date of Delivery",
+      "Time of Delivery",
+      "Mode of Delivery",
+      "Sex of Baby",
+      "Birth Weight (g)",
+      "APGAR Score (1 min)",
+      "APGAR Score (5 min)",
+      "Placental Delivery Time",
+      "Estimated Blood Loss (mL)",
+      "Perineal Status / Tear Degree",
+      "Maternal Complications",
+      "Neonatal Complications",
+      "Attending Doctor",
+      "Assisting Nurse/Midwife",
+      "Maternal Outcome",
+      "Neonatal Outcome",
+      "Doctor/Midwife Signature"
+    ],
+    "name": "make labour room register\n",
+    "isMandatory": false
+  },
+  {
+    "name": "make register havinge record of name age ftnd or lscs male or female child wt of baby date and time of delivery and diagnosis of ptainet ",
+    "isMandatory": false,
+    "fieldConfigs": [
+      {
+        "source": "Patient Registration",
+        "name": "Patient Name",
+        "type": "text"
+      },
+      {
+        "type": "number",
+        "name": "Age",
+        "source": "Patient Registration"
+      },
+      {
+        "type": "select",
+        "options": [
+          "FTND",
+          "LSCS"
+        ],
+        "name": "Delivery Type",
+        "source": "Surgical Notes"
+      },
+      {
+        "type": "select",
+        "options": [
+          "Male",
+          "Female",
+          "Intersex"
+        ],
+        "source": "Surgical Notes",
+        "name": "Baby Sex"
+      },
+      {
+        "name": "Baby Weight (kg)",
+        "source": "Surgical Notes",
+        "type": "number"
+      },
+      {
+        "type": "datetime",
+        "source": "Surgical Notes",
+        "name": "Delivery Date and Time"
+      },
+      {
+        "type": "text",
+        "name": "Mother's Diagnosis",
+        "source": "IPD Admission"
+      }
+    ],
+    "id": "reg_1782569043134",
+    "fields": [
+      "Patient Name",
+      "Age",
+      "Delivery Type",
+      "Baby Sex",
+      "Baby Weight (kg)",
+      "Delivery Date and Time",
+      "Mother's Diagnosis"
+    ]
+  },
+  {
+    "isMandatory": false,
+    "name": "make registor for cbc report ",
+    "fields": [
+      "Patient Name",
+      "Age",
+      "Gender",
+      "Patient ID",
+      "Date of Sample Collection",
+      "Date of Report",
+      "Ordering Physician",
+      "Lab ID",
+      "Hemoglobin (g/dL)",
+      "RBC Count (x10^6/µL)",
+      "WBC Count (x10^3/µL)",
+      "Platelet Count (x10^3/µL)",
+      "Hematocrit (%)",
+      "MCV (fL)",
+      "MCH (pg)",
+      "MCHC (g/dL)",
+      "RDW-CV (%)",
+      "Neutrophils (%)",
+      "Lymphocytes (%)",
+      "Monocytes (%)",
+      "Eosinophils (%)",
+      "Basophils (%)",
+      "Absolute Neutrophils (x10^3/µL)",
+      "Absolute Lymphocytes (x10^3/µL)",
+      "Absolute Monocytes (x10^3/µL)",
+      "Absolute Eosinophils (x10^3/µL)",
+      "Absolute Basophils (x10^3/µL)",
+      "ESR (mm/hr)",
+      "Interpretation/Comments"
+    ],
+    "fieldConfigs": [
+      {
+        "source": "Patient Registration",
+        "name": "Patient Name",
+        "type": "text"
+      },
+      {
+        "name": "Age",
+        "source": "Patient Registration",
+        "type": "number"
+      },
+      {
+        "source": "Patient Registration",
+        "name": "Gender",
+        "options": [
+          "Male",
+          "Female",
+          "Other"
+        ],
+        "type": "select"
+      },
+      {
+        "type": "text",
+        "name": "Patient ID",
+        "source": "Patient Registration"
+      },
+      {
+        "type": "date",
+        "name": "Date of Sample Collection",
+        "source": "OPD Consultation"
+      },
+      {
+        "name": "Date of Report",
+        "source": "OPD Consultation",
+        "type": "date"
+      },
+      {
+        "name": "Ordering Physician",
+        "source": "OPD Consultation",
+        "type": "text"
+      },
+      {
+        "name": "Lab ID",
+        "source": "General",
+        "type": "text"
+      },
+      {
+        "type": "number",
+        "name": "Hemoglobin (g/dL)",
+        "source": "OPD Consultation"
+      },
+      {
+        "type": "number",
+        "name": "RBC Count (x10^6/µL)",
+        "source": "OPD Consultation"
+      },
+      {
+        "name": "WBC Count (x10^3/µL)",
+        "source": "OPD Consultation",
+        "type": "number"
+      },
+      {
+        "type": "number",
+        "name": "Platelet Count (x10^3/µL)",
+        "source": "OPD Consultation"
+      },
+      {
+        "type": "number",
+        "source": "OPD Consultation",
+        "name": "Hematocrit (%)"
+      },
+      {
+        "type": "number",
+        "name": "MCV (fL)",
+        "source": "OPD Consultation"
+      },
+      {
+        "name": "MCH (pg)",
+        "source": "OPD Consultation",
+        "type": "number"
+      },
+      {
+        "type": "number",
+        "name": "MCHC (g/dL)",
+        "source": "OPD Consultation"
+      },
+      {
+        "type": "number",
+        "name": "RDW-CV (%)",
+        "source": "OPD Consultation"
+      },
+      {
+        "type": "number",
+        "source": "OPD Consultation",
+        "name": "Neutrophils (%)"
+      },
+      {
+        "type": "number",
+        "source": "OPD Consultation",
+        "name": "Lymphocytes (%)"
+      },
+      {
+        "name": "Monocytes (%)",
+        "source": "OPD Consultation",
+        "type": "number"
+      },
+      {
+        "type": "number",
+        "source": "OPD Consultation",
+        "name": "Eosinophils (%)"
+      },
+      {
+        "type": "number",
+        "source": "OPD Consultation",
+        "name": "Basophils (%)"
+      },
+      {
+        "source": "OPD Consultation",
+        "name": "Absolute Neutrophils (x10^3/µL)",
+        "type": "number"
+      },
+      {
+        "type": "number",
+        "source": "OPD Consultation",
+        "name": "Absolute Lymphocytes (x10^3/µL)"
+      },
+      {
+        "name": "Absolute Monocytes (x10^3/µL)",
+        "source": "OPD Consultation",
+        "type": "number"
+      },
+      {
+        "name": "Absolute Eosinophils (x10^3/µL)",
+        "source": "OPD Consultation",
+        "type": "number"
+      },
+      {
+        "source": "OPD Consultation",
+        "name": "Absolute Basophils (x10^3/µL)",
+        "type": "number"
+      },
+      {
+        "source": "OPD Consultation",
+        "name": "ESR (mm/hr)",
+        "type": "number",
+        "description": "Erythrocyte Sedimentation Rate, sometimes included with CBC"
+      },
+      {
+        "type": "text",
+        "source": "OPD Consultation",
+        "name": "Interpretation/Comments"
+      }
+    ],
+    "id": "reg_1782649574830"
+  },
+  {
+    "name": "make opd patient register date wise with payment collection ",
+    "isMandatory": false,
+    "id": "reg_1782649673846",
+    "fieldConfigs": [
+      {
+        "type": "text",
+        "name": "Patient Name",
+        "source": "Patient Registration"
+      },
+      {
+        "name": "Patient ID",
+        "source": "Patient Registration",
+        "type": "text"
+      },
+      {
+        "type": "number",
+        "name": "Age",
+        "source": "Patient Registration"
+      },
+      {
+        "name": "Gender",
+        "source": "Patient Registration",
+        "options": [
+          "Male",
+          "Female",
+          "Other"
+        ],
+        "type": "select"
+      },
+      {
+        "type": "text",
+        "source": "Patient Registration",
+        "name": "Contact Number"
+      },
+      {
+        "source": "OPD Consultation",
+        "name": "Date of Visit",
+        "type": "date"
+      },
+      {
+        "type": "time",
+        "name": "Time of Visit",
+        "source": "OPD Consultation"
+      },
+      {
+        "source": "OPD Consultation",
+        "name": "Department",
+        "type": "text"
+      },
+      {
+        "type": "text",
+        "name": "Consulting Doctor",
+        "source": "OPD Consultation"
+      },
+      {
+        "type": "select",
+        "options": [
+          "New",
+          "Follow-up"
+        ],
+        "name": "Visit Type",
+        "source": "OPD Consultation"
+      },
+      {
+        "type": "text",
+        "source": "OPD Consultation",
+        "name": "Chief Complaint"
+      },
+      {
+        "type": "text",
+        "name": "Service Description",
+        "source": "General"
+      },
+      {
+        "type": "number",
+        "source": "General",
+        "name": "Amount Billed"
+      },
+      {
+        "name": "Amount Paid",
+        "source": "General",
+        "type": "number"
+      },
+      {
+        "type": "select",
+        "options": [
+          "Cash",
+          "Card",
+          "UPI",
+          "Online Transfer",
+          "Insurance",
+          "Other"
+        ],
+        "name": "Payment Method",
+        "source": "General"
+      },
+      {
+        "type": "text",
+        "name": "Receipt Number",
+        "source": "General"
+      },
+      {
+        "type": "number",
+        "source": "General",
+        "name": "Balance Due"
+      },
+      {
+        "type": "select",
+        "options": [
+          "Paid",
+          "Partial",
+          "Unpaid",
+          "Waived"
+        ],
+        "name": "Payment Status",
+        "source": "General"
+      }
+    ],
+    "fields": [
+      "Patient Name",
+      "Patient ID",
+      "Age",
+      "Gender",
+      "Contact Number",
+      "Date of Visit",
+      "Time of Visit",
+      "Department",
+      "Consulting Doctor",
+      "Visit Type",
+      "Chief Complaint",
+      "Service Description",
+      "Amount Billed",
+      "Amount Paid",
+      "Payment Method",
+      "Receipt Number",
+      "Balance Due",
+      "Payment Status"
+    ]
+  },
+  {
+    "isMandatory": true,
+    "name": "MTP Admission Register (Form III)",
+    "fields": [
+      "Serial Number",
+      "Admission Date",
+      "Name",
+      "Relation (W/D of)",
+      "Age",
+      "Religion",
+      "Address",
+      "Marital Status",
+      "Gest. Weeks",
+      "Indication",
+      "Method",
+      "Date MTP",
+      "Date Discharge",
+      "Contraceptive",
+      "RMP Name",
+      "Remarks"
+    ],
+    "id": "mtp_register"
+  }
+]

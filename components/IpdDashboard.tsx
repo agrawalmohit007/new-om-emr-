@@ -2135,11 +2135,14 @@ export const LabourProgressModule: React.FC<{
     deliveryTime: "",
   });
   const [isGenerating, setIsGenerating] = useState(false);
+  const [showPartographViewModal, setShowPartographViewModal] = useState(false);
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
 
   const handleAdd = () => {
+    const dateTimeVal = entry.dateTime || new Date().toISOString();
     const newEntry: LabourProgressEntry = {
-      id: Date.now().toString(),
-      dateTime: new Date().toISOString(),
+      id: editingLogId || Date.now().toString(),
+      dateTime: dateTimeVal,
       fhr: entry.fhr || "",
       amnioticFluid: entry.amnioticFluid || "",
       moulding: entry.moulding || "",
@@ -2151,9 +2154,26 @@ export const LabourProgressModule: React.FC<{
       vitals: entry.vitals || { pulse: "", bp: "", temp: "" },
       urine: entry.urine || { protein: "", acetone: "", volume: "" },
     };
-    const updated = [...(activeAdmission.labourProgress || []), newEntry];
+    let updated;
+    if (editingLogId) {
+        updated = (activeAdmission.labourProgress || []).map(item => item.id === editingLogId ? newEntry : item);
+        setEditingLogId(null);
+    } else {
+        updated = [...(activeAdmission.labourProgress || []), newEntry];
+    }
     onUpdateAdmission({ labourProgress: updated });
     setEntry({ cervixDilatation: 0, descent: 5, fhr: "", contractionFreq: "", contractionDur: "", amnioticFluid: "I", moulding: "0", drugsIvFluids: "", vitals: { pulse: "", bp: "", temp: "" }, urine: { protein: "", acetone: "", volume: "" } });
+  };
+
+  const handleDelete = (idToDelete: string) => {
+    if (confirm("Are you sure you want to delete this log entry?")) {
+        const updated = (activeAdmission.labourProgress || []).filter(item => item.id !== idToDelete);
+        onUpdateAdmission({ labourProgress: updated });
+        if (editingLogId === idToDelete) {
+            setEditingLogId(null);
+            setEntry({ cervixDilatation: 0, descent: 5, fhr: "", contractionFreq: "", contractionDur: "", amnioticFluid: "I", moulding: "0", drugsIvFluids: "", vitals: { pulse: "", bp: "", temp: "" }, urine: { protein: "", acetone: "", volume: "" } });
+        }
+    }
   };
 
   const handleGenerateAi = async () => {
@@ -2177,15 +2197,325 @@ export const LabourProgressModule: React.FC<{
     }
   };
 
-  const handlePrint = () => {
+  const renderPartographChartSvg = (isPrintMode = false) => {
+      const sortedAll = [...(activeAdmission.labourProgress || [])].sort((a,b) => Date.parse(a.dateTime) - Date.parse(b.dateTime));
+      
+      const activeEntries = sortedAll.filter(e => e.cervixDilatation >= 4);
+
+      let anchorTimeMs = 0;
+      if (activeEntries.length > 0) {
+          const firstActive = activeEntries[0];
+          const offsetHours = Math.max(0, firstActive.cervixDilatation - 4);
+          anchorTimeMs = Date.parse(firstActive.dateTime) - (offsetHours * 60 * 60 * 1000);
+      } else if (sortedAll.length > 0) {
+          anchorTimeMs = Date.parse(sortedAll[0].dateTime);
+      }
+
+      const getX = (dtStr: string): number => {
+          if (!anchorTimeMs) return 80;
+          const elapsed = (Date.parse(dtStr) - anchorTimeMs) / (1000 * 60 * 60);
+          return 80 + Math.min(Math.max(0, elapsed), 24) * 30;
+      };
+
+      const dilPoints = [];
+      const descPoints = [];
+      const fhrPoints = [];
+      const pulsePoints = [];
+      const bpArrows = [];
+      const liquorText = [];
+      const mouldingText = [];
+      const contractionBlocks = [];
+      const oxytocinText = [];
+      const drugsText = [];
+      const tempText = [];
+      const urineText = [];
+      const timeLabels = [];
+
+      sortedAll.forEach((l) => {
+          const x = getX(l.dateTime);
+          
+          if (l.cervixDilatation >= 4) {
+              const yDil = 430 - (l.cervixDilatation * 20);
+              dilPoints.push(`${x},${yDil}`);
+
+              const yDesc = 230 + (l.descent * 40);
+              descPoints.push(`${x},${yDesc}`);
+          }
+
+          const fhrVal = parseInt(l.fhr);
+          if (!isNaN(fhrVal) && fhrVal >= 80 && fhrVal <= 200) {
+              const yFhr = 240 - fhrVal;
+              fhrPoints.push(`${x},${yFhr}`);
+          }
+
+          if (l.amnioticFluid) {
+              liquorText.push({ x, text: l.amnioticFluid });
+          }
+
+          if (l.moulding) {
+              let mNotation = l.moulding;
+              if (mNotation === '1' || mNotation === '+') mNotation = '+';
+              else if (mNotation === '2' || mNotation === '++') mNotation = '++';
+              else if (mNotation === '3' || mNotation === '+++') mNotation = '+++';
+              mouldingText.push({ x, text: mNotation });
+          }
+
+          const freqVal = parseInt(l.contractionFreq);
+          const durVal = parseInt(l.contractionDur);
+          if (!isNaN(freqVal) && freqVal > 0 && freqVal <= 5) {
+              contractionBlocks.push({ x, freq: freqVal, dur: isNaN(durVal) ? 0 : durVal });
+          }
+
+          if (l.drugsIvFluids) {
+              const oxyMatch = l.drugsIvFluids.match(/(\d+\s*U(?:\/L)?)\s*@\s*(\d+)/i);
+              if (oxyMatch) {
+                  oxytocinText.push({ x, dose: oxyMatch[1], drops: oxyMatch[2] + '/m' });
+              }
+              drugsText.push({ x, text: l.drugsIvFluids });
+          }
+
+          if (l.vitals?.pulse) {
+              const pVal = parseInt(l.vitals.pulse);
+              if (!isNaN(pVal) && pVal >= 60 && pVal <= 180) {
+                  pulsePoints.push(`${x},${880 - pVal}`);
+              }
+          }
+          if (l.vitals?.bp) {
+              const bpParts = l.vitals.bp.split('/');
+              if (bpParts.length === 2) {
+                  const sys = parseInt(bpParts[0]);
+                  const dia = parseInt(bpParts[1]);
+                  if (!isNaN(sys) && !isNaN(dia)) {
+                      bpArrows.push({ x, sys: 880 - sys, dia: 880 - dia });
+                  }
+              }
+          }
+
+          if (l.vitals?.temp) {
+              tempText.push({ x, text: l.vitals.temp });
+          }
+
+          if (l.urine) {
+              urineText.push({ x, prot: l.urine.protein || '-', acet: l.urine.acetone || '-', vol: l.urine.volume || '-' });
+          }
+
+          const dateObj = new Date(l.dateTime);
+          const tLabel = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+          timeLabels.push({ x, label: tLabel });
+      });
+
+      const dilPolyline = dilPoints.join(' ');
+      const descPolyline = descPoints.join(' ');
+      const fhrPolyline = fhrPoints.join(' ');
+      const pulsePolyline = pulsePoints.join(' ');
+
+      return `
+        <svg viewBox="0 0 880 1200" style="width: 100%; height: auto; background: white; font-family: sans-serif;">
+            <defs>
+                <pattern id="gridPattern" width="30" height="20" patternUnits="userSpaceOnUse">
+                    <path d="M 30 0 L 0 0 0 20" fill="none" stroke="#f1f5f9" stroke-width="0.75" />
+                </pattern>
+                <pattern id="dotsPattern" width="6" height="6" patternUnits="userSpaceOnUse">
+                    <circle cx="3" cy="3" r="1.2" fill="#64748b" />
+                </pattern>
+                <pattern id="stripesPattern" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="8" stroke="#334155" stroke-width="2" />
+                </pattern>
+            </defs>
+
+            <!-- 1. FETAL HEART RATE GRID (y = 40 to 160) -->
+            <text x="80" y="30" font-size="10" font-weight="black" fill="#475569">FETAL HEART RATE (bpm)</text>
+            <rect x="80" y="40" width="720" height="120" fill="url(#gridPattern)" stroke="#cbd5e1" stroke-width="1.5" />
+            <line x1="80" y1="60" x2="800" y2="60" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3,3" />
+            <line x1="80" y1="140" x2="800" y2="140" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3,3" />
+            <g font-size="8" font-weight="bold" fill="#64748b" text-anchor="end">
+                <text x="70" y="43">200</text>
+                <text x="70" y="63">180</text>
+                <text x="70" y="83">160</text>
+                <text x="70" y="103">140</text>
+                <text x="70" y="123">120</text>
+                <text x="70" y="143">100</text>
+                <text x="70" y="163">80</text>
+            </g>
+            ${fhrPolyline ? `<polyline points="${fhrPolyline}" fill="none" stroke="#0f172a" stroke-width="2" />` : ''}
+            ${fhrPoints.map(p => {
+                const [cx, cy] = p.split(',');
+                return `<circle cx="${cx}" cy="${cy}" r="3" fill="#0f172a" />`;
+            }).join('')}
+
+            <!-- 2. LIQUOR & MOULDING ROWS (y = 170 to 210) -->
+            <rect x="80" y="170" width="720" height="40" fill="none" stroke="#cbd5e1" stroke-width="1.5" />
+            <line x1="80" y1="190" x2="800" y2="190" stroke="#cbd5e1" stroke-width="1" />
+            ${Array.from({length: 25}).map((_, i) => `<line x1="${80 + (i * 30)}" y1="170" x2="${80 + (i * 30)}" y2="210" stroke="#cbd5e1" stroke-width="0.5" />`).join('')}
+            <g font-size="8" font-weight="black" fill="#475569" text-anchor="end">
+                <text x="70" y="183">Amniotic Fluid</text>
+                <text x="70" y="203">Moulding</text>
+            </g>
+            ${liquorText.map(t => `<text x="${t.x}" y="183" font-size="9" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.text}</text>`).join('')}
+            ${mouldingText.map(t => `<text x="${t.x}" y="203" font-size="9" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.text}</text>`).join('')}
+
+            <!-- 3. CERVICAL DILATATION & DESCENT GRID (y = 230 to 430) -->
+            <text x="80" y="225" font-size="10" font-weight="black" fill="#475569">CERVIX DILATATION (✕) & DESCENT OF HEAD (◯)</text>
+            <rect x="80" y="230" width="720" height="200" fill="url(#gridPattern)" stroke="#cbd5e1" stroke-width="1.5" />
+            <line x1="80" y1="350" x2="260" y2="230" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6,4" />
+            <text x="210" y="280" fill="#d97706" font-size="9" font-weight="black" transform="rotate(-33 210 280)">Alert Line</text>
+            <line x1="200" y1="350" x2="380" y2="230" stroke="#ef4444" stroke-width="2.5" />
+            <text x="320" y="280" fill="#dc2626" font-size="9" font-weight="black" transform="rotate(-33 320 280)">Action Line</text>
+            
+            <g font-size="9" font-weight="bold" fill="#64748b" text-anchor="end">
+                ${[10,9,8,7,6,5,4,3,2,1,0].map(val => `<text x="70" y="${230 + ((10 - val) * 20) + 3}">${val}</text>`).join('')}
+            </g>
+            <g font-size="9" font-weight="bold" fill="#64748b" text-anchor="start">
+                ${[0,1,2,3,4,5].map(val => `<text x="810" y="${230 + (val * 40) + 3}">${val}</text>`).join('')}
+            </g>
+
+            ${dilPolyline ? `<polyline points="${dilPolyline}" fill="none" stroke="#ec4899" stroke-width="2.5" />` : ''}
+            ${dilPoints.map(p => {
+                const [cx, cy] = p.split(',').map(Number);
+                return `
+                    <g stroke="#db2777" stroke-width="2.5">
+                        <line x1="${cx - 4}" y1="${cy - 4}" x2="${cx + 4}" y2="${cy + 4}" />
+                        <line x1="${cx + 4}" y1="${cy - 4}" x2="${cx - 4}" y2="${cy + 4}" />
+                    </g>
+                `;
+            }).join('')}
+
+            ${descPolyline ? `<polyline points="${descPolyline}" fill="none" stroke="#3b82f6" stroke-width="2" stroke-dasharray="4,2" />` : ''}
+            ${descPoints.map(p => {
+                const [cx, cy] = p.split(',');
+                return `<circle cx="${cx}" cy="${cy}" r="4.5" fill="white" stroke="#2563eb" stroke-width="2.5" />`;
+            }).join('')}
+
+            <!-- 4. HOURS & TIME ROW (y = 430 to 470) -->
+            <rect x="80" y="430" width="720" height="40" fill="none" stroke="#cbd5e1" stroke-width="1.5" />
+            <line x1="80" y1="450" x2="800" y2="450" stroke="#cbd5e1" stroke-width="1" />
+            ${Array.from({length: 25}).map((_, i) => `<line x1="${80 + (i * 30)}" y1="430" x2="${80 + (i * 30)}" y2="470" stroke="#cbd5e1" stroke-width="0.5" />`).join('')}
+            <g font-size="8" font-weight="black" fill="#475569" text-anchor="end">
+                <text x="70" y="443">Hours</text>
+                <text x="70" y="463">Time</text>
+            </g>
+            ${Array.from({length: 24}).map((_, h) => `<text x="${95 + (h * 30)}" y="443" font-size="8" font-weight="bold" fill="#64748b" text-anchor="middle">${h + 1}</text>`).join('')}
+            ${timeLabels.map(t => `<text x="${t.x}" y="463" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.label}</text>`).join('')}
+
+            <!-- 5. CONTRACTIONS GRID (y = 490 to 590) -->
+            <text x="80" y="485" font-size="10" font-weight="black" fill="#475569">CONTRACTIONS PER 10 MINS</text>
+            <rect x="80" y="490" width="720" height="100" fill="none" stroke="#cbd5e1" stroke-width="1.5" />
+            ${Array.from({length: 25}).map((_, i) => `<line x1="${80 + (i * 30)}" y1="490" x2="${80 + (i * 30)}" y2="590" stroke="#cbd5e1" stroke-width="0.5" />`).join('')}
+            ${Array.from({length: 6}).map((_, i) => `<line x1="80" y1="${490 + (i * 20)}" x2="800" y2="${490 + (i * 20)}" stroke="#f1f5f9" stroke-width="0.75" />`).join('')}
+            <g font-size="9" font-weight="bold" fill="#64748b" text-anchor="end">
+                <text x="70" y="503">5</text>
+                <text x="70" y="523">4</text>
+                <text x="70" y="543">3</text>
+                <text x="70" y="563">2</text>
+                <text x="70" y="583">1</text>
+            </g>
+            ${contractionBlocks.map(b => {
+                const fillStyle = b.dur < 20 ? 'url(#dotsPattern)' : b.dur <= 40 ? 'url(#stripesPattern)' : '#334155';
+                const strokeStyle = b.dur < 20 ? '#64748b' : '#334155';
+                return Array.from({length: b.freq}).map((_, i) => {
+                    const blockY = 570 - (i * 20);
+                    return `<rect x="${b.x - 12}" y="${blockY}" width="24" height="18" fill="${fillStyle}" stroke="${strokeStyle}" stroke-width="0.5" />`;
+                }).join('');
+            }).join('')}
+
+            <!-- 6. OXYTOCIN & DRUGS ROW (y = 605 to 685) -->
+            <rect x="80" y="605" width="720" height="80" fill="none" stroke="#cbd5e1" stroke-width="1.5" />
+            <line x1="80" y1="625" x2="800" y2="625" stroke="#cbd5e1" stroke-width="1" />
+            <line x1="80" y1="645" x2="800" y2="645" stroke="#cbd5e1" stroke-width="1" />
+            ${Array.from({length: 25}).map((_, i) => `<line x1="${80 + (i * 30)}" y1="605" x2="${80 + (i * 30)}" y2="685" stroke="#cbd5e1" stroke-width="0.5" />`).join('')}
+            <g font-size="8" font-weight="black" fill="#475569" text-anchor="end">
+                <text x="70" y="618">Oxytocin U/L</text>
+                <text x="70" y="638">drops/min</text>
+                <text x="70" y="668">Drugs / IV</text>
+            </g>
+            ${oxytocinText.map(t => {
+                return `
+                    <text x="${t.x}" y="618" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.dose}</text>
+                    <text x="${t.x}" y="638" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.drops}</text>
+                `;
+            }).join('')}
+            ${drugsText.map(t => `<text x="${t.x}" y="668" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.text.slice(0, 12)}</text>`).join('')}
+
+            <!-- 7. PULSE & BP GRID (y = 700 to 820) -->
+            <text x="80" y="695" font-size="10" font-weight="black" fill="#475569">MATERNAL PULSE (•) & BP (↕)</text>
+            <rect x="80" y="700" width="720" height="120" fill="url(#gridPattern)" stroke="#cbd5e1" stroke-width="1.5" />
+            <g font-size="8" font-weight="bold" fill="#64748b" text-anchor="end">
+                <text x="70" y="703">180</text>
+                <text x="70" y="723">160</text>
+                <text x="70" y="743">140</text>
+                <text x="70" y="763">120</text>
+                <text x="70" y="783">100</text>
+                <text x="70" y="803">80</text>
+                <text x="70" y="823">60</text>
+            </g>
+            ${pulsePolyline ? `<polyline points="${pulsePolyline}" fill="none" stroke="#0f172a" stroke-width="1.5" />` : ''}
+            ${pulsePoints.map(p => {
+                const [cx, cy] = p.split(',');
+                return `<circle cx="${cx}" cy="${cy}" r="3" fill="#0f172a" />`;
+            }).join('')}
+            ${bpArrows.map(a => {
+                return `
+                    <g stroke="#0284c7" stroke-width="1.5">
+                        <line x1="${a.x}" y1="${a.sys}" x2="${a.x}" y2="${a.dia}" />
+                        <line x1="${a.x - 3}" y1="${a.sys + 3}" x2="${a.x}" y2="${a.sys}" />
+                        <line x1="${a.x + 3}" y1="${a.sys + 3}" x2="${a.x}" y2="${a.sys}" />
+                        <line x1="${a.x - 3}" y1="${a.dia - 3}" x2="${a.x}" y2="${a.dia}" />
+                        <line x1="${a.x + 3}" y1="${a.dia - 3}" x2="${a.x}" y2="${a.dia}" />
+                    </g>
+                `;
+            }).join('')}
+
+            <!-- 8. TEMP & URINE ROWS (y = 835 to 915) -->
+            <rect x="80" y="835" width="720" height="80" fill="none" stroke="#cbd5e1" stroke-width="1.5" />
+            <line x1="80" y1="855" x2="800" y2="855" stroke="#cbd5e1" stroke-width="1" />
+            <line x1="80" y1="875" x2="800" y2="875" stroke="#cbd5e1" stroke-width="1" />
+            <line x1="80" y1="895" x2="800" y2="895" stroke="#cbd5e1" stroke-width="1" />
+            ${Array.from({length: 25}).map((_, i) => `<line x1="${80 + (i * 30)}" y1="835" x2="${80 + (i * 30)}" y2="915" stroke="#cbd5e1" stroke-width="0.5" />`).join('')}
+            <g font-size="8" font-weight="black" fill="#475569" text-anchor="end">
+                <text x="70" y="848">Temp °C</text>
+                <text x="70" y="868">Urine Protein</text>
+                <text x="70" y="888">Urine Acetone</text>
+                <text x="70" y="908">Urine Volume</text>
+            </g>
+            ${tempText.map(t => `<text x="${t.x}" y="848" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.text}</text>`).join('')}
+            ${urineText.map((t, idx) => {
+                return `
+                    <text x="${80 + (idx * 30) + 15}" y="868" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.prot}</text>
+                    <text x="${80 + (idx * 30) + 15}" y="888" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.acet}</text>
+                    <text x="${80 + (idx * 30) + 15}" y="908" font-size="7" font-weight="bold" fill="#0f172a" text-anchor="middle">${t.vol}</text>
+                `;
+            }).join('')}
+        </svg>
+      `;
+  };
+
+  const handlePrintChart = () => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
     printWindow.document
-      .write(`<html><head><title>WHO Partograph</title><style>table { width: 100%; border-collapse: collapse; font-size: 12px; } th, td { border: 1px solid #000; padding: 4px; text-align: left; }</style></head><body style="padding:20px; font-family:sans-serif;">
-            <div style="height: 35mm; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 5mm;">
+      .write(`<html><head><title>WHO Partograph Chart</title><style>@media print { svg { max-width: 100%; height: auto; } }</style></head><body style="padding:20px; font-family:sans-serif; text-align: center;">
+            <div style="height: 30mm; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 5mm;">
                 ${printSettings?.headerImage ? `<img src="${printSettings.headerImage}" style="max-height: 100%; max-width: 100%; object-fit: contain;" />` : ''}
             </div>
-            <h2 style="text-align:center; text-transform:uppercase;">Labour Progress (WHO Partograph)</h2>
+            <h2 style="text-transform:uppercase; margin-bottom: 10px;">WHO Modified Partograph Chart</h2>
+            <div style="border: 1px solid #cbd5e1; padding: 15px; background: white; border-radius: 10px; max-width: 800px; margin: 0 auto;">
+                ${renderPartographChartSvg(true)}
+            </div>
+            <br/><br/><div style="text-align:right; max-width: 800px; margin: 0 auto;"><strong>Signature of Clinician</strong></div>
+        </body></html>`);
+    printWindow.document.close();
+    printWindow.print();
+  };
+
+  const handlePrintTable = () => {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+    printWindow.document
+      .write(`<html><head><title>Labour Progression Records</title><style>table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 15px; } th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; } th { background-color: #f8fafc; font-weight: bold; }</style></head><body style="padding:20px; font-family:sans-serif;">
+            <div style="height: 30mm; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 5mm;">
+                ${printSettings?.headerImage ? `<img src="${printSettings.headerImage}" style="max-height: 100%; max-width: 100%; object-fit: contain;" />` : ''}
+            </div>
+            <h2 style="text-align:center; text-transform:uppercase; margin-bottom: 15px;">Labour Progression Records</h2>
             <table>
                 <thead><tr>
                     <th>Time</th>
@@ -2199,20 +2529,22 @@ export const LabourProgressModule: React.FC<{
                     <th>Urine (Prot/Acet/Vol)</th>
                 </tr></thead>
                 <tbody>
-                    ${(activeAdmission.labourProgress || []).map((l) => `<tr>
-                        <td>${new Date(l.dateTime).toLocaleString()}</td>
-                        <td>${l.cervixDilatation}</td>
-                        <td>${l.descent}/5</td>
-                        <td>${l.fhr}</td>
-                        <td>${l.amnioticFluid} / ${l.moulding}</td>
-                        <td>${l.contractionFreq} / 10m (${l.contractionDur}s)</td>
-                        <td>${l.drugsIvFluids || "-"}</td>
-                        <td>${l.vitals?.pulse || "-"} / ${l.vitals?.bp || "-"} / ${l.vitals?.temp || "-"}</td>
-                        <td>${l.urine?.protein || "-"}/${l.urine?.acetone || "-"}/${l.urine?.volume || "-"}</td>
-                    </tr>`).join("")}
+                    ${(activeAdmission.labourProgress || []).map((l) => {
+                        return `<tr>
+                            <td>${new Date(l.dateTime).toLocaleString()}</td>
+                            <td>${l.cervixDilatation}</td>
+                            <td>${l.descent}/5</td>
+                            <td>${l.fhr}</td>
+                            <td>${l.amnioticFluid} / ${l.moulding}</td>
+                            <td>${l.contractionFreq} / 10m (dots)</td>
+                            <td>${l.drugsIvFluids || "-"}</td>
+                            <td>${l.vitals?.pulse || "-"} / ${l.vitals?.bp || "-"} / ${l.vitals?.temp || "-"}</td>
+                            <td>${l.urine?.protein || "-"}/${l.urine?.acetone || "-"}/${l.urine?.volume || "-"}</td>
+                        </tr>`;
+                    }).join("")}
                 </tbody>
             </table>
-            <br/><br/><div style="text-align:right;"><strong>Signature</strong></div>
+            <br/><br/><div style="text-align:right;"><strong>Signature of Clinician</strong></div>
         </body></html>`);
     printWindow.document.close();
     printWindow.print();
@@ -2246,11 +2578,17 @@ export const LabourProgressModule: React.FC<{
         </h3>
         <div className="flex gap-2">
             <button onClick={() => setAiModalOpen(true)} className="bg-purple-100 text-purple-700 px-4 py-2 rounded-lg font-bold text-xs uppercase hover:bg-purple-200 shadow-sm border border-purple-200 transition-all flex items-center gap-1">✨ AI Auto Populate</button>
+                        <button
+            onClick={() => setShowPartographViewModal(true)}
+            className="bg-slate-800 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase hover:bg-slate-900 shadow flex items-center gap-1"
+            >
+            📊 Show Partograph
+            </button>
             <button
-            onClick={handlePrint}
+            onClick={handlePrintTable}
             className="bg-pink-600 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase hover:bg-pink-700 shadow flex items-center gap-1"
             >
-            🖨️ Print Partograph
+            🖨️ Print Labour Table
             </button>
         </div>
       </div>
@@ -2258,7 +2596,7 @@ export const LabourProgressModule: React.FC<{
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4 items-end">
         <div>
           <label className="block text-[9px] font-bold uppercase text-slate-400">Date/Time</label>
-          <input type="datetime-local" defaultValue={new Date().toISOString().slice(0, 16)} className="border p-2 rounded-lg w-full font-bold text-xs" />
+          <input type="datetime-local" value={entry.dateTime ? new Date(entry.dateTime).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16)} onChange={(e) => setEntry({ ...entry, dateTime: new Date(e.target.value).toISOString() })} className="border p-2 rounded-lg w-full font-bold text-xs" />
         </div>
         <div>
           <label className="block text-[9px] font-bold uppercase text-slate-400">FHR (bpm)</label>
@@ -2335,6 +2673,7 @@ export const LabourProgressModule: React.FC<{
               <th className="p-3 border-b border-slate-200 text-center" colSpan={4}>Fetal Condition</th>
               <th className="p-3 border-b border-slate-200 text-center" colSpan={2}>Maternal Condition</th>
               <th className="p-3 border-b border-slate-200 text-center">Intervention</th>
+              <th className="p-3 border-b border-slate-200 text-center">Actions</th>
             </tr>
             <tr className="divide-x divide-slate-200 border-b border-slate-200 bg-white">
               <th className="p-2 sticky left-0 bg-white shadow-[1px_0_0_#e2e8f0]"></th>
@@ -2347,6 +2686,7 @@ export const LabourProgressModule: React.FC<{
               <th className="p-2 text-center text-orange-600">Vit (P/BP/T)</th>
               <th className="p-2 text-center text-orange-600">Urine (P/A/V)</th>
               <th className="p-2 text-center text-green-700">Drugs / IV</th>
+              <th className="p-2 text-center text-slate-500"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -2364,16 +2704,55 @@ export const LabourProgressModule: React.FC<{
                 <td className="p-2 text-center text-[10px]"><span className="font-bold">{l.vitals?.pulse||"-"}</span> / {l.vitals?.bp||"-"} / {l.vitals?.temp||"-"}</td>
                 <td className="p-2 text-center text-[10px]">{l.urine?.protein||"-"}/{l.urine?.acetone||"-"}/{l.urine?.volume||"-"}</td>
                 <td className="p-2 text-[10px] max-w-[150px] truncate" title={l.drugsIvFluids}>{l.drugsIvFluids || "-"}</td>
+                <td className="p-2 text-center whitespace-nowrap">
+                  <button onClick={() => { setEditingLogId(l.id); setEntry(l); }} className="text-blue-600 hover:text-blue-800 font-bold mr-2 text-xs">✏️ Edit</button>
+                  <button onClick={() => handleDelete(l.id)} className="text-red-600 hover:text-red-800 font-bold text-xs">🗑️ Delete</button>
+                </td>
               </tr>
             ))}
             {(!activeAdmission.labourProgress || activeAdmission.labourProgress.length === 0) && (
               <tr>
-                <td colSpan={10} className="p-8 text-center text-slate-400 italic">No partograph entires logged yet.</td>
+                <td colSpan={11} className="p-8 text-center text-slate-400 italic">No partograph entires logged yet.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Partograph Chart (Shifted below the table) */}
+      <div className="bg-slate-50 p-6 border border-slate-200 rounded-3xl mt-6">
+          <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest mb-4 text-center">Live Graphic Partograph (WHO Standard)</h4>
+          <div className="w-full max-w-4xl mx-auto bg-white p-4 border rounded-2xl shadow-sm" dangerouslySetInnerHTML={{ __html: renderPartographChartSvg(false) }} />
+      </div>
+
+      {/* Show Partograph Modal View Overlay */}
+      {showPartographViewModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-5xl p-6 shadow-2xl relative flex flex-col text-left max-h-[90vh]">
+            <button onClick={() => setShowPartographViewModal(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-900 font-black text-2xl">&times;</button>
+            
+            <div className="flex justify-between items-center border-b pb-4 mb-4">
+              <h3 className="font-black text-xl uppercase tracking-tighter text-slate-800">
+                  WHO Modified Partograph Chart
+              </h3>
+              <button 
+                onClick={handlePrintChart}
+                className="bg-pink-600 hover:bg-pink-700 text-white font-black text-xs uppercase px-4 py-2 rounded-xl shadow mr-8"
+              >
+                🖨️ Print Chart
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto flex-grow pr-2">
+              <div className="w-full bg-white p-4 border rounded-2xl shadow-sm" dangerouslySetInnerHTML={{ __html: renderPartographChartSvg(false) }} />
+            </div>
+
+            <div className="flex justify-end pt-4 border-t mt-4">
+              <button onClick={() => setShowPartographViewModal(false)} className="px-5 py-2 border rounded-xl font-black uppercase text-[10px] tracking-wider hover:bg-slate-50">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

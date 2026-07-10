@@ -1,6 +1,6 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { FirebaseConfig } from '../types';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -147,4 +147,30 @@ export const setupCloudListener = (onUpdate: (key: string, data: any) => void) =
 
 const handleCloudError = (error: any, context: string) => {
     console.warn(`⚠️ Cloud Sync Limited for ${context}:`, error);
+};
+
+export const getFirestoreDb = () => firestore;
+
+export const getCachedCompletion = async (key: string): Promise<any | null> => {
+    if (!firestore || !navigator.onLine) return null;
+    try {
+        const docRef = doc(firestore, 'ai_cache', key);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+            return snap.data().payload;
+        }
+    } catch (e) {
+        // Quiet ignore
+    }
+    return null;
+};
+
+export const saveCachedCompletion = async (key: string, payload: any): Promise<void> => {
+    if (!firestore || !navigator.onLine) return;
+    try {
+        const docRef = doc(firestore, 'ai_cache', key);
+        await setDoc(docRef, { payload, timestamp: Date.now() });
+    } catch (e) {
+        // Quiet ignore
+    }
 };
